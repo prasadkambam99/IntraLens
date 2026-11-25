@@ -17,6 +17,15 @@ A personal Android app for researching intraday trades on NSE stocks. Everything
 
 Alerts (every 15 min while the market is open): picks ready, entry triggered, target hit, stop-loss hit.
 
+## NIFTY 50 and BANK NIFTY
+* The Today screen has a separate section for the two indices.
+* **Fixed stop-loss and target, 20 points each by default.** You can change both in Settings.
+* **CALL or PUT suggestion:** a BUY signal means "Buy NIFTY <strike> CE (CALL)", and a SELL signal means "Buy NIFTY <strike> PE (PUT)". The strike is the one closest to the price (at the money): NIFTY strikes go in steps of 50 and BANK NIFTY in steps of 100. The suggestion uses the nearest expiry.
+* The stop-loss and target are levels on the **index**. An at-the-money option moves roughly half as many points, so 20 index points is about 10 points on the option premium.
+* **The indices have their own AI.** It uses 1-minute data, because a 20-point move is smaller than a single 5-minute candle.
+  * Yahoo keeps only about 30 days of 1-minute data, so the app saves it every day and gets better over time.
+* With equal stop and target, **break-even is 50%**.
+
 ## The strategy and the AI
 
 * **Setup:** a 15-minute opening range breakout.

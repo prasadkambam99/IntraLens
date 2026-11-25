@@ -39,7 +39,7 @@ class MarketWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
             val todays = repo.store.journal().filter { it.date == todayKey }
             if (!hadToday && todays.isNotEmpty()) {
                 notify(1, "Today's picks are ready",
-                    todays.joinToString("  •  ") { "${it.symbol} ${it.direction.label} ${(it.probability * 100).toInt()}%" })
+                    todays.joinToString("  •  ") { "${it.symbol} ${label(it)} ${(it.probability * 100).toInt()}%" })
             }
             changes.filter { it.old != null && it.pick.date == todayKey }.forEach { c ->
                 val p = c.pick
@@ -50,13 +50,16 @@ class MarketWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                     TradeStatus.TIME_EXIT -> "Closed at 3:15 PM (${"%+.1f".format(p.r)}R)"
                     else -> null
                 } ?: return@forEach
-                notify(p.symbol.hashCode(), "${p.symbol} ${p.direction.label}: ${p.status.label}", msg)
+                notify(p.symbol.hashCode(), "${p.symbol} ${label(p)}: ${p.status.label}", msg)
             }
             if (snap.picks.isEmpty()) Result.retry() else Result.success()
         } catch (e: Exception) {
             Result.retry()
         }
     }
+
+    private fun label(j: com.nmx.intradaylens.data.JournalPick) =
+        if (Repository.isIndex(j.symbol)) (if (j.direction == com.nmx.intradaylens.engine.Direction.LONG) "CALL" else "PUT") else j.direction.label
 
     private fun notify(id: Int, title: String, text: String) {
         val ctx = applicationContext

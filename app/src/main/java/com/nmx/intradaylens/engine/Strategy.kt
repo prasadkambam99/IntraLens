@@ -34,17 +34,17 @@ object Strategy {
     class Setup(val plan: TradePlan, val features: DoubleArray, val reasons: List<String>)
 
     fun marketContext(history: List<Session>, today: Session?): MarketContext {
-        if (today == null || history.isEmpty() || today.bars.size < Rules.OR_BARS) return MarketContext.NONE
+        if (today == null || history.isEmpty() || !today.orComplete) return MarketContext.NONE
         val prevClose = history.last().close
-        val or = today.bars.take(Rules.OR_BARS)
+        val or = today.orBars
         return MarketContext(
             gapPct = (today.open - prevClose) / prevClose * 100,
             orMovePct = (or.last().c - today.open) / today.open * 100
         )
     }
 
-    fun setup(history: List<Session>, today: Session, dir: Direction, mkt: MarketContext): Setup? {
-        if (history.size < Rules.MIN_HISTORY_DAYS || today.bars.size < Rules.OR_BARS) return null
+    fun setup(history: List<Session>, today: Session, dir: Direction, mkt: MarketContext, rule: PlanRule = PlanRule.STOCK): Setup? {
+        if (history.size < Rules.MIN_HISTORY_DAYS || !today.orComplete) return null
         val s = dir.sign.toDouble()
         val prev = history.last()
         val prevClose = prev.close
@@ -53,22 +53,22 @@ object Strategy {
         val ema20 = Indicators.ema(closes, 20)
         val rsi = Indicators.rsi(closes)
 
-        val or = today.bars.take(Rules.OR_BARS)
+        val or = today.orBars
         val orh = or.maxOf { it.h }
         val orl = or.minOf { it.l }
         val orClose = or.last().c
         val orRange = max(orh - orl, orClose * 0.0005)
         val orVol = or.sumOf { it.v }.toDouble()
-        val avgOrVol = history.takeLast(10).map { d -> d.bars.take(Rules.OR_BARS).sumOf { it.v }.toDouble() }
+        val avgOrVol = history.takeLast(10).map { d -> d.orBars.sumOf { it.v }.toDouble() }
             .filter { it > 0 }.ifEmpty { listOf(1.0) }.average()
         val vwap = Indicators.vwap(or)
 
         // Trade plan
         val entry = if (dir == Direction.LONG) orh * (1 + Rules.ENTRY_BUFFER) else orl * (1 - Rules.ENTRY_BUFFER)
         val rawRisk = if (dir == Direction.LONG) entry - orl else orh - entry
-        val risk = rawRisk.coerceIn(entry * Rules.MIN_RISK, entry * Rules.MAX_RISK)
+        val risk = rule.fixedRiskPoints ?: rawRisk.coerceIn(entry * Rules.MIN_RISK, entry * Rules.MAX_RISK)
         val stop = entry - s * risk
-        val target = entry + s * risk * Rules.REWARD_R
+        val target = entry + s * risk * rule.rewardR
         val plan = TradePlan(dir, entry, stop, target)
 
         val gap = (today.open - prevClose) / prevClose
@@ -139,7 +139,7 @@ object Strategy {
         var fill = 0.0
         var entryT = 0L
         var last = bars.last().c
-        for (i in Rules.OR_BARS until bars.size) {
+        for (i in today.orBars.size until bars.size) {
             val b = bars[i]
             val t = b.time
             last = b.c

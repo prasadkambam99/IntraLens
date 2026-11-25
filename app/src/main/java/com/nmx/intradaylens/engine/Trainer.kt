@@ -44,20 +44,25 @@ object Trainer {
     fun buildSamples(
         data: Map<String, List<Session>>,
         market: List<Session>,
-        excludeDate: LocalDate? = null
+        excludeDate: LocalDate? = null,
+        rule: PlanRule = PlanRule.STOCK,
+        /** Optional finer bars (e.g. 1-minute) used for the trade itself; history still comes from [data]. */
+        intraday: Map<String, List<Session>>? = null
     ): List<Sample> {
         val mktByDate = market.withIndex().associate { (i, s) -> s.date to i }
         val out = ArrayList<Sample>()
         for ((sym, sessions) in data) {
-            for (i in Rules.MIN_HISTORY_DAYS until sessions.size) {
-                val day = sessions[i]
+            val days = intraday?.get(sym) ?: if (intraday != null) emptyList() else sessions
+            for (day in days) {
+                val i = sessions.indexOfFirst { it.date == day.date }.let { if (it < 0) sessions.count { s -> s.date < day.date } else it }
+                if (i < Rules.MIN_HISTORY_DAYS) continue
                 if (day.date == excludeDate) continue
                 if (day.bars.last().time.isBefore(Rules.EXIT_TIME.minusMinutes(5))) continue // incomplete day
                 val hist = sessions.subList(maxOf(0, i - 40), i)
                 val mi = mktByDate[day.date]
                 val mkt = if (mi != null && mi > 0) Strategy.marketContext(market.subList(maxOf(0, mi - 5), mi), market[mi]) else MarketContext.NONE
                 for (dir in Direction.values()) {
-                    val st = Strategy.setup(hist, day, dir, mkt) ?: continue
+                    val st = Strategy.setup(hist, day, dir, mkt, rule) ?: continue
                     out += Sample(sym, day.date, dir, st.features, Strategy.simulate(day, st.plan))
                 }
             }
@@ -69,17 +74,17 @@ object Trainer {
      * Walk-forward check: train on the older 70% of days, test on the newest 30%.
      * Then the live model is retrained on all days.
      */
-    fun trainAndEvaluate(samples: List<Sample>, stocks: Int, topN: Int = 5, minProb: Double = 0.0): Pair<LogisticModel, ModelReport>? {
+    fun trainAndEvaluate(samples: List<Sample>, stocks: Int, topN: Int = 5, minProb: Double = 0.0, lambda: Double = 2.0, minTriggered: Int = 60): Pair<LogisticModel, ModelReport>? {
         val trig = samples.filter { it.triggered }
-        if (trig.size < 60) return null
+        if (trig.size < minTriggered) return null
         val dates = samples.map { it.date }.distinct().sorted()
         val cut = dates[(dates.size * 0.7).toInt().coerceIn(1, dates.size - 1)]
         val train = trig.filter { it.date < cut }
         val testAll = samples.filter { it.date >= cut }
         val test = testAll.filter { it.triggered }
-        if (train.size < 40 || test.isEmpty()) return null
+        if (train.size < minTriggered * 2 / 3 || test.isEmpty()) return null
 
-        val m = LogisticModel.train(train.map { it.x }, train.map { it.label })
+        val m = LogisticModel.train(train.map { it.x }, train.map { it.label }, lambda)
         val base = train.map { it.label }.average().coerceIn(0.01, 0.99)
         var ll = 0.0; var llb = 0.0
         val preds = test.map { m.predict(it.x) }
@@ -104,7 +109,7 @@ object Trainer {
             .flatMap { (_, list) -> list.sortedByDescending { m.predict(it.x) }.filter { m.predict(it.x) >= minProb }.take(topN) }
         val chosenTrig = chosen.filter { it.triggered }
 
-        val full = LogisticModel.train(trig.map { it.x }, trig.map { it.label })
+        val full = LogisticModel.train(trig.map { it.x }, trig.map { it.label }, lambda)
         val report = ModelReport(
             trainedAt = System.currentTimeMillis(),
             stocks = stocks,
@@ -132,18 +137,21 @@ object Trainer {
         date: LocalDate,
         data: Map<String, List<Session>>,
         market: List<Session>,
-        model: LogisticModel
+        model: LogisticModel,
+        rule: PlanRule = PlanRule.STOCK,
+        intraday: Map<String, List<Session>>? = null
     ): List<Pick> {
         val mi = market.indexOfFirst { it.date == date }
         val mkt = if (mi > 0) Strategy.marketContext(market.subList(maxOf(0, mi - 5), mi), market[mi]) else MarketContext.NONE
         val picks = ArrayList<Pick>()
         for ((sym, sessions) in data) {
-            val i = sessions.indexOfFirst { it.date == date }
+            val i0 = sessions.indexOfFirst { it.date == date }
+            val i = if (i0 < 0) sessions.count { it.date < date } else i0
             if (i < Rules.MIN_HISTORY_DAYS) continue
-            val day = sessions[i]
+            val day = intraday?.get(sym)?.firstOrNull { it.date == date } ?: sessions.getOrNull(i0) ?: continue
             val hist = sessions.subList(maxOf(0, i - 40), i)
             val best = Direction.values().mapNotNull { dir ->
-                Strategy.setup(hist, day, dir, mkt)?.let { it to model.predict(it.features) }
+                Strategy.setup(hist, day, dir, mkt, rule)?.let { it to model.predict(it.features) }
             }.maxByOrNull { it.second } ?: continue
             val (st, p) = best
             picks += Pick(sym, date, st.plan, p, st.reasons, st.features, Strategy.simulate(day, st.plan), Indicators.levels(hist))

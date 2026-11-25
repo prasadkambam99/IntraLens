@@ -84,10 +84,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun model() = repo.model()
 
     fun saveSettings(s: Settings) {
-        val universeChanged = s.universe != _state.value.settings.universe
+        val old = _state.value.settings
+        val universeChanged = s.universe != old.universe
+        val pointsChanged = s.indexRiskPts != old.indexRiskPts || s.indexTargetPts != old.indexTargetPts
         repo.store.saveSettings(s)
         _state.update { it.copy(settings = s) }
-        if (universeChanged) { repo.store.modelDay = null; refresh(force = true) }
+        if (universeChanged) { repo.store.modelDay = null; repo.store.indexModelDay = null; refresh(force = true) }
+        else if (pointsChanged) { repo.store.indexModelDay = null; refresh() }
     }
 
     fun clearJournal() {

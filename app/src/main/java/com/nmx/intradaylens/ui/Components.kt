@@ -140,12 +140,12 @@ fun IntradayChart(session: Session, plan: TradePlan, modifier: Modifier = Modifi
         val pad = (hi - lo) * 0.05
         val top = hi + pad; val bottom = lo - pad
         fun y(v: Double) = ((top - v) / (top - bottom) * size.height).toFloat()
-        val slots = 75
+        val slots = (375 * 60 / session.barSeconds).toInt().coerceAtLeast(bars.size)
         val w = size.width / slots
         // Opening range shading
-        val orBars = bars.take(3)
+        val orBars = session.orBars.ifEmpty { bars.take(1) }
         drawRect(C.Gold.copy(alpha = 0.08f), Offset(0f, y(orBars.maxOf { it.h })),
-            Size(w * 3, y(orBars.minOf { it.l }) - y(orBars.maxOf { it.h })))
+            Size(w * orBars.size, y(orBars.minOf { it.l }) - y(orBars.maxOf { it.h })))
         bars.forEachIndexed { i, b ->
             val x = i * w + w / 2
             val col = if (b.c >= b.o) C.Green else C.Red
@@ -155,8 +155,11 @@ fun IntradayChart(session: Session, plan: TradePlan, modifier: Modifier = Modifi
         }
         // VWAP
         val path = Path()
+        var pv = 0.0; var vol = 0.0
         bars.indices.forEach { i ->
-            val v = Indicators.vwap(bars.subList(0, i + 1))
+            val b = bars[i]; val tp = (b.h + b.l + b.c) / 3
+            pv += tp * maxOf(b.v, 1L); vol += maxOf(b.v, 1L)
+            val v = pv / vol
             val pt = Offset(i * w + w / 2, y(v))
             if (i == 0) path.moveTo(pt.x, pt.y) else path.lineTo(pt.x, pt.y)
         }

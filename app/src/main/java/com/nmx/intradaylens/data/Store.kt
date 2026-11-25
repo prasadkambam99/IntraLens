@@ -16,7 +16,10 @@ data class Settings(
     val topN: Int = 8,
     val minProb: Double = 0.45,
     val riskRupees: Int = 500,
-    val notifications: Boolean = true
+    val notifications: Boolean = true,
+    /** NIFTY / BANK NIFTY fixed stop-loss and target, in index points. */
+    val indexRiskPts: Int = 20,
+    val indexTargetPts: Int = 20
 ) {
     companion object {
         /** Large, liquid NSE stocks (NIFTY 50 style list). Edit in Settings. */
@@ -59,7 +62,9 @@ class Store(private val ctx: Context) {
         topN = prefs.getInt("topN", 8),
         minProb = prefs.getFloat("minProb", 0.45f).toDouble(),
         riskRupees = prefs.getInt("risk", 500),
-        notifications = prefs.getBoolean("notify", true)
+        notifications = prefs.getBoolean("notify", true),
+        indexRiskPts = prefs.getInt("idxRisk", 20),
+        indexTargetPts = prefs.getInt("idxTarget", 20)
     )
 
     fun saveSettings(s: Settings) {
@@ -69,6 +74,8 @@ class Store(private val ctx: Context) {
             .putFloat("minProb", s.minProb.toFloat())
             .putInt("risk", s.riskRupees)
             .putBoolean("notify", s.notifications)
+            .putInt("idxRisk", s.indexRiskPts)
+            .putInt("idxTarget", s.indexTargetPts)
             .apply()
     }
 
@@ -86,12 +93,12 @@ class Store(private val ctx: Context) {
         }
     }
 
-    fun mergeCandles(sym: String, fresh: List<Candle>): List<Candle> {
+    fun mergeCandles(sym: String, fresh: List<Candle>, maxBars: Int = 75 * 250): List<Candle> {
         val map = java.util.TreeMap<Long, Candle>()
         loadCandles(sym).forEach { map[it.t] = it }
         fresh.forEach { map[it.t] = it }
         // keep about one year of 5-minute bars
-        val all = map.values.toList().takeLast(75 * 250)
+        val all = map.values.toList().takeLast(maxBars)
         file(sym).writeText(all.joinToString("\n") { "${it.t},${it.o},${it.h},${it.l},${it.c},${it.v}" })
         return all
     }
@@ -109,12 +116,17 @@ class Store(private val ctx: Context) {
         get() = prefs.getString("modelDay", null)
         set(v) = prefs.edit().putString("modelDay", v).apply()
 
-    fun saveModel(m: LogisticModel, r: ModelReport) {
-        prefs.edit().putString("model", m.serialize()).putString("report", reportToJson(r).toString()).apply()
+    var indexModelDay: String?
+        get() = prefs.getString("indexModelDay", null)
+        set(v) = prefs.edit().putString("indexModelDay", v).apply()
+
+    /** [key] = "" for the stock model, "index" for the NIFTY / BANK NIFTY model. */
+    fun saveModel(m: LogisticModel, r: ModelReport, key: String = "") {
+        prefs.edit().putString("model$key", m.serialize()).putString("report$key", reportToJson(r).toString()).apply()
     }
 
-    fun loadModel(): LogisticModel? = prefs.getString("model", null)?.let { LogisticModel.deserialize(it) }
-    fun loadReport(): ModelReport? = prefs.getString("report", null)?.let { runCatching { reportFromJson(JSONObject(it)) }.getOrNull() }
+    fun loadModel(key: String = ""): LogisticModel? = prefs.getString("model$key", null)?.let { LogisticModel.deserialize(it) }
+    fun loadReport(key: String = ""): ModelReport? = prefs.getString("report$key", null)?.let { runCatching { reportFromJson(JSONObject(it)) }.getOrNull() }
 
     private fun reportToJson(r: ModelReport) = JSONObject().apply {
         put("trainedAt", r.trainedAt); put("stocks", r.stocks); put("days", r.days)

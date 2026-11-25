@@ -30,12 +30,19 @@ object MarketApi {
     fun yahooSymbol(symbol: String) = if (symbol.startsWith("^") || symbol.contains(".")) symbol else "$symbol.NS"
 
     /** [range] e.g. "60d" or "1d"; 5-minute bars are available for the last 60 days. */
-    fun candles(symbol: String, range: String, interval: String = "5m"): List<Candle> {
+    fun candles(symbol: String, range: String, interval: String = "5m"): List<Candle> =
+        chart(symbol, "range=$range&interval=$interval")
+
+    /** 1-minute bars are only kept by Yahoo for ~30 days, max 7 days per request. */
+    fun candlesBetween(symbol: String, fromSec: Long, toSec: Long, interval: String = "1m"): List<Candle> =
+        chart(symbol, "period1=$fromSec&period2=$toSec&interval=$interval")
+
+    private fun chart(symbol: String, query: String): List<Candle> {
         val ys = URLEncoder.encode(yahooSymbol(symbol), "UTF-8")
         var lastError: Exception? = null
         for (host in listOf("query1", "query2")) {
             try {
-                val url = "https://$host.finance.yahoo.com/v8/finance/chart/$ys?range=$range&interval=$interval&includePrePost=false"
+                val url = "https://$host.finance.yahoo.com/v8/finance/chart/$ys?$query&includePrePost=false"
                 val body = get(url)
                 return parseChart(body)
             } catch (e: Exception) {

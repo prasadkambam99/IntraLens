@@ -27,6 +27,21 @@ data class Session(val date: LocalDate, val bars: List<Candle>) {
     val low get() = bars.minOf { it.l }
     val close get() = bars.last().c
     val volume get() = bars.sumOf { it.v }
+
+    /** Bars of the opening range (9:15–9:30), whatever the bar size (1-min or 5-min). */
+    val orBars: List<Candle> get() = bars.filter { it.time.isBefore(Rules.PICKS_READY) }
+
+    /** Bar length in seconds (300 for 5-min, 60 for 1-min). */
+    val barSeconds: Long get() = if (bars.size >= 2) (bars[1].t - bars[0].t).coerceIn(60, 300) else 300
+
+    /** True once the first 15 minutes are finished. */
+    val orComplete: Boolean get() {
+        val o = orBars
+        if (o.isEmpty()) return false
+        if (bars.size > o.size) return true
+        val endOfLast = java.time.Instant.ofEpochSecond(o.last().t + barSeconds).atZone(IST).toLocalTime()
+        return !endOfLast.isBefore(Rules.PICKS_READY)
+    }
 }
 
 enum class Direction(val sign: Int, val label: String) {
@@ -57,6 +72,18 @@ object Rules {
     const val MIN_HISTORY_DAYS = 21
 }
 
+/**
+ * How stop-loss and target are placed.
+ * Stocks: stop at the other side of the opening range (0.35%–1.2%), target 1.5x risk.
+ * Indices: fixed points, e.g. 20 points stop and 20 points target.
+ */
+data class PlanRule(val fixedRiskPoints: Double? = null, val rewardR: Double = Rules.REWARD_R) {
+    companion object {
+        val STOCK = PlanRule()
+        fun points(risk: Double, target: Double) = PlanRule(risk, target / risk)
+    }
+}
+
 /** Trade plan for one stock / one direction on one day. */
 data class TradePlan(
     val direction: Direction,
@@ -67,6 +94,11 @@ data class TradePlan(
     val risk get() = kotlin.math.abs(entry - stop)
     val riskPct get() = risk / entry * 100
     val rewardPct get() = kotlin.math.abs(target - entry) / entry * 100
+    val reward get() = kotlin.math.abs(target - entry)
+    /** Reward-to-risk ratio. */
+    val rr get() = reward / risk
+    /** Win rate needed to break even. */
+    val breakEven get() = 1.0 / (1.0 + rr)
 }
 
 data class TradeResult(
@@ -96,7 +128,7 @@ data class Pick(
     val levels: DayLevels
 ) {
     /** Expected R per trade if the entry triggers (ignores 3:15 exits). */
-    val expectedR get() = probability * Rules.REWARD_R - (1 - probability)
+    val expectedR get() = probability * plan.rr - (1 - probability)
 }
 
 /** Useful reference levels from the previous session. */

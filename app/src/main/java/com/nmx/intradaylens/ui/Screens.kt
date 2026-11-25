@@ -44,6 +44,7 @@ import com.nmx.intradaylens.data.Settings
 import com.nmx.intradaylens.data.hm
 import com.nmx.intradaylens.engine.Direction
 import com.nmx.intradaylens.engine.IST
+import com.nmx.intradaylens.engine.Options
 import com.nmx.intradaylens.engine.Pick
 import com.nmx.intradaylens.engine.Rules
 import com.nmx.intradaylens.engine.Strategy
@@ -106,12 +107,13 @@ fun TodayScreen(st: UiState, vm: MainViewModel) {
         }
         item {
             Text(
-                "Research only. Picks are a 15-min opening-range breakout; the % is the AI's estimate that the target is hit before the stop-loss, once entry triggers. Break-even is 40%.",
+                "Research only. Picks are a 15-min opening-range breakout; the % is the AI's estimate that the target is hit before the stop-loss, once entry triggers. Stocks break even at 40%; NIFTY / BANK NIFTY (equal points) at 50%.",
                 color = C.Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
         }
-        if (snap != null && snap.indexPicks.isNotEmpty()) {
-            item { SectionTitle("NIFTY 50 & BANK NIFTY") }
+        if (snap != null && (snap.indexPicks.isNotEmpty() || snap.indexNote != null)) {
+            item { SectionTitle("NIFTY 50 & BANK NIFTY (SL ${st.settings.indexRiskPts} / TARGET ${st.settings.indexTargetPts} PTS)") }
+            snap.indexNote?.let { note -> item { AppCard { Text(note, color = C.Muted, fontSize = 13.sp) } } }
             items(snap.indexPicks, key = { "i" + it.symbol }) { PickCard(it, st.settings.riskRupees, minProb = st.settings.minProb) { vm.select(it) } }
         }
         if (snap != null) {
@@ -157,14 +159,14 @@ fun PickCard(p: Pick, risk: Int, compact: Boolean = false, minProb: Double = 0.0
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(Repository.label(p.symbol), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = C.Text)
                     Spacer(Modifier.width(8.dp))
-                    Chip(p.plan.direction.label, dirColor(p.plan.direction))
+                    Chip(Options.idea(p.symbol, p.plan)?.shortLabel ?: p.plan.direction.label, dirColor(p.plan.direction))
                 }
                 Spacer(Modifier.height(4.dp))
                 Row {
                     Chip(p.result.status.label + if (p.result.status == TradeStatus.ACTIVE || p.result.status == TradeStatus.WIN ||
                         p.result.status == TradeStatus.LOSS || p.result.status == TradeStatus.TIME_EXIT) String.format(" (%+.1fR)", p.result.r) else "",
                         statusColor(p.result.status))
-                    if (p.probability < 0.40) { Spacer(Modifier.width(6.dp)); Chip("Below break-even", C.Red) }
+                    if (p.probability < p.plan.breakEven) { Spacer(Modifier.width(6.dp)); Chip("Below break-even", C.Red) }
                     else if (p.probability < minProb) { Spacer(Modifier.width(6.dp)); Chip("Low confidence", C.Gold) }
                 }
             }
@@ -175,7 +177,10 @@ fun PickCard(p: Pick, risk: Int, compact: Boolean = false, minProb: Double = 0.0
             PlanRow(p.plan)
             Spacer(Modifier.height(6.dp))
             if (Repository.isIndex(p.symbol)) {
-                Text("Risk ${String.format("%.0f", p.plan.risk)} pts • Target ${String.format("%.0f", p.plan.risk * Rules.REWARD_R)} pts • trade via futures/options",
+                Options.idea(p.symbol, p.plan)?.let { o ->
+                    Text(o.text, color = dirColor(p.plan.direction), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text("Index SL ${String.format("%.0f", p.plan.risk)} pts • Target ${String.format("%.0f", p.plan.reward)} pts • Break-even ${p.plan.breakEven.pct0()}",
                     color = C.Muted, fontSize = 12.sp)
             } else {
                 val qty = floor(risk / p.plan.risk).toInt()
@@ -200,7 +205,7 @@ fun DetailScreen(p: Pick, st: UiState, vm: MainViewModel) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(Repository.label(p.symbol), fontWeight = FontWeight.Bold, fontSize = 24.sp, color = C.Text)
                         Spacer(Modifier.width(8.dp))
-                        Chip(p.plan.direction.label, dirColor(p.plan.direction))
+                        Chip(Options.idea(p.symbol, p.plan)?.shortLabel ?: p.plan.direction.label, dirColor(p.plan.direction))
                     }
                     Text(p.date.format(dayFmt), color = C.Muted, fontSize = 12.sp)
                     Spacer(Modifier.height(4.dp))
@@ -221,19 +226,29 @@ fun DetailScreen(p: Pick, st: UiState, vm: MainViewModel) {
             PlanRow(p.plan)
             Spacer(Modifier.height(10.dp))
             val buy = p.plan.direction == Direction.LONG
-            val steps = listOf(
+            val idx = Repository.isIndex(p.symbol)
+            val opt = Options.idea(p.symbol, p.plan)
+            val steps = if (idx && opt != null) listOf(
+                "When: after 9:30 AM, only until ${Rules.ENTRY_DEADLINE.hm()}.",
+                if (buy) "Entry: when ${Repository.label(p.symbol)} goes ABOVE ${p.plan.entry.p2()} → ${opt.text}."
+                else "Entry: when ${Repository.label(p.symbol)} goes BELOW ${p.plan.entry.p2()} → ${opt.text}.",
+                "Stop-loss: exit the option when the index reaches ${p.plan.stop.p2()} (${String.format("%.0f", p.plan.risk)} pts against you).",
+                "Target: exit the option when the index reaches ${p.plan.target.p2()} (${String.format("%.0f", p.plan.reward)} pts in your favour).",
+                "Exit anyway at ${Rules.EXIT_TIME.hm()} if neither is hit."
+            ) else listOf(
                 "When: after 9:30 AM, only until ${Rules.ENTRY_DEADLINE.hm()}.",
                 if (buy) "Entry: BUY when price goes above ${p.plan.entry.p2()} (top of first 15 minutes)."
                 else "Entry: SELL (short) when price goes below ${p.plan.entry.p2()} (bottom of first 15 minutes).",
                 "Stop-loss: exit at ${p.plan.stop.p2()} (${String.format("%.2f", p.plan.riskPct)}% risk).",
-                "Target: exit at ${p.plan.target.p2()} (${String.format("%.2f", p.plan.rewardPct)}% = 1.5× risk).",
+                "Target: exit at ${p.plan.target.p2()} (${String.format("%.2f", p.plan.rewardPct)}% = ${String.format("%.1f", p.plan.rr)}× risk).",
                 "Exit anyway at ${Rules.EXIT_TIME.hm()} if neither is hit."
             )
             steps.forEach { Text("• $it", color = C.Text, fontSize = 13.sp, modifier = Modifier.padding(vertical = 2.dp)) }
             Spacer(Modifier.height(8.dp))
             if (Repository.isIndex(p.symbol)) {
-                Text("Index levels: risk ${String.format("%.0f", p.plan.risk)} points, target ${String.format("%.0f", p.plan.risk * Rules.REWARD_R)} points. " +
-                    "An index can't be bought directly — use these levels on the chart to time futures or options.",
+                Text("Stop-loss and target are on the INDEX chart, not the option price. An at-the-money option usually moves about " +
+                    "half as many points as the index, so ${String.format("%.0f", p.plan.reward)} index points ≈ ${String.format("%.0f", p.plan.reward / 2)} points on the option premium. " +
+                    "Break-even win rate: ${p.plan.breakEven.pct0()} (before brokerage).",
                     color = C.Gold, fontSize = 13.sp)
             } else {
                 val qty = floor(st.settings.riskRupees / p.plan.risk).toInt()
@@ -388,7 +403,7 @@ fun JournalScreen(st: UiState) {
                 AppCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(e.symbol, fontWeight = FontWeight.Bold, color = C.Text, modifier = Modifier.weight(1f))
-                        Chip(e.direction.label, dirColor(e.direction))
+                        Chip(if (Repository.isIndex(e.symbol)) (if (e.direction == Direction.LONG) "CALL" else "PUT") else e.direction.label, dirColor(e.direction))
                         Spacer(Modifier.width(6.dp))
                         Chip(e.probability.pct0(), C.Gold)
                         Spacer(Modifier.width(6.dp))
@@ -418,6 +433,22 @@ fun ModelScreen(st: UiState) {
                     "It keeps more history every day you use the app.",
                 color = C.Muted, fontSize = 13.sp
             )
+        }
+        st.snapshot?.indexReport?.let { ir ->
+            SectionTitle("NIFTY / BANK NIFTY AI (SL ${st.settings.indexRiskPts} / TARGET ${st.settings.indexTargetPts} PTS, 1-MIN DATA)")
+            AppCard {
+                Text("Tested on ${ir.testFrom} → ${ir.testTo} (${ir.testSamples} trades the AI never saw).", color = C.Muted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    LabelValue("Any breakout", ir.baseWinRate.pct0())
+                    LabelValue("AI picks", if (ir.topTriggered == 0) "—" else ir.topWinRate.pct0(), if (ir.topWinRate >= 0.5) C.Green else C.Red)
+                    LabelValue("Avg pts/trade", String.format("%+.1f", ir.topAvgR * st.settings.indexRiskPts), if (ir.topAvgR > 0) C.Green else C.Red)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text("Break-even is 50% with equal stop and target. Few days of 1-minute data so far, so treat these numbers as rough until the journal has more trades.",
+                    color = C.Muted, fontSize = 11.sp)
+            }
+            SectionTitle("STOCKS AI")
         }
         if (r == null) {
             AppCard { Text("Not trained yet — needs at least 21 days of data. Refresh on Today.", color = C.Muted) }
@@ -478,6 +509,8 @@ fun ModelScreen(st: UiState) {
 fun SettingsScreen(st: UiState, vm: MainViewModel) {
     val s = st.settings
     var risk by remember(s) { mutableStateOf(s.riskRupees.toString()) }
+    var idxRisk by remember(s) { mutableStateOf(s.indexRiskPts.toString()) }
+    var idxTarget by remember(s) { mutableStateOf(s.indexTargetPts.toString()) }
     var minProb by remember(s) { mutableStateOf(s.minProb.toFloat()) }
     var topN by remember(s) { mutableStateOf(s.topN.toFloat()) }
     var notify by remember(s) { mutableStateOf(s.notifications) }
@@ -487,6 +520,15 @@ fun SettingsScreen(st: UiState, vm: MainViewModel) {
         AppCard {
             OutlinedTextField(risk, { risk = it.filter(Char::isDigit) }, label = { Text("Risk per trade (₹) — for position size") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            Row {
+                OutlinedTextField(idxRisk, { idxRisk = it.filter(Char::isDigit) }, label = { Text("Index SL (pts)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                OutlinedTextField(idxTarget, { idxTarget = it.filter(Char::isDigit) }, label = { Text("Index target (pts)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
+            }
+            Text("For NIFTY 50 and BANK NIFTY. Changing these retrains the index AI.", color = C.Muted, fontSize = 11.sp)
             Spacer(Modifier.height(12.dp))
             Text("Minimum AI confidence to show a pick: ${(minProb * 100).toInt()}%", color = C.Text)
             Slider(minProb, { minProb = it }, valueRange = 0.40f..0.80f, steps = 7)
@@ -506,7 +548,9 @@ fun SettingsScreen(st: UiState, vm: MainViewModel) {
                     Settings(
                         universe = universe.split(",", "\n", " ").map { it.trim().uppercase() }.filter { it.isNotEmpty() }.distinct(),
                         topN = topN.toInt(), minProb = (Math.round(minProb * 100) / 100.0),
-                        riskRupees = risk.toIntOrNull() ?: 500, notifications = notify
+                        riskRupees = risk.toIntOrNull() ?: 500, notifications = notify,
+                        indexRiskPts = (idxRisk.toIntOrNull() ?: 20).coerceIn(5, 500),
+                        indexTargetPts = (idxTarget.toIntOrNull() ?: 20).coerceIn(5, 1000)
                     )
                 )
             }, modifier = Modifier.fillMaxWidth()) { Text("Save") }
