@@ -39,6 +39,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nmx.intradaylens.data.Phase
+import com.nmx.intradaylens.data.Repository
 import com.nmx.intradaylens.data.Settings
 import com.nmx.intradaylens.data.hm
 import com.nmx.intradaylens.engine.Direction
@@ -75,11 +76,14 @@ fun TodayScreen(st: UiState, vm: MainViewModel) {
                         }
                         Text(sub, color = C.Muted, fontSize = 12.sp)
                     }
-                    snap?.nifty?.let { n ->
-                        Column(horizontalAlignment = Alignment.End) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        snap?.indices.orEmpty().forEach { n ->
                             Text(n.name, color = C.Muted, fontSize = 11.sp)
-                            Text(String.format("%,.0f", n.last), color = C.Text, fontWeight = FontWeight.Bold)
-                            Text(String.format("%+.2f%%", n.changePct), color = if (n.changePct >= 0) C.Green else C.Red, fontSize = 12.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(String.format("%,.0f", n.last), color = C.Text, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(String.format("%+.2f%%", n.changePct), color = if (n.changePct >= 0) C.Green else C.Red, fontSize = 12.sp)
+                            }
                         }
                     }
                 }
@@ -105,6 +109,10 @@ fun TodayScreen(st: UiState, vm: MainViewModel) {
                 "Research only. Picks are a 15-min opening-range breakout; the % is the AI's estimate that the target is hit before the stop-loss, once entry triggers. Break-even is 40%.",
                 color = C.Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
+        }
+        if (snap != null && snap.indexPicks.isNotEmpty()) {
+            item { SectionTitle("NIFTY 50 & BANK NIFTY") }
+            items(snap.indexPicks, key = { "i" + it.symbol }) { PickCard(it, st.settings.riskRupees, minProb = st.settings.minProb) { vm.select(it) } }
         }
         if (snap != null) {
             val strong = snap.picks.filter { it.probability >= st.settings.minProb }.take(st.settings.topN)
@@ -147,7 +155,7 @@ fun PickCard(p: Pick, risk: Int, compact: Boolean = false, minProb: Double = 0.0
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(p.symbol, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = C.Text)
+                    Text(Repository.label(p.symbol), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = C.Text)
                     Spacer(Modifier.width(8.dp))
                     Chip(p.plan.direction.label, dirColor(p.plan.direction))
                 }
@@ -166,9 +174,14 @@ fun PickCard(p: Pick, risk: Int, compact: Boolean = false, minProb: Double = 0.0
             Spacer(Modifier.height(10.dp))
             PlanRow(p.plan)
             Spacer(Modifier.height(6.dp))
-            val qty = floor(risk / p.plan.risk).toInt()
-            Text("Risk ${String.format("%.2f", p.plan.riskPct)}% • Reward ${String.format("%.2f", p.plan.rewardPct)}% • Qty for ₹$risk risk: $qty",
-                color = C.Muted, fontSize = 12.sp)
+            if (Repository.isIndex(p.symbol)) {
+                Text("Risk ${String.format("%.0f", p.plan.risk)} pts • Target ${String.format("%.0f", p.plan.risk * Rules.REWARD_R)} pts • trade via futures/options",
+                    color = C.Muted, fontSize = 12.sp)
+            } else {
+                val qty = floor(risk / p.plan.risk).toInt()
+                Text("Risk ${String.format("%.2f", p.plan.riskPct)}% • Reward ${String.format("%.2f", p.plan.rewardPct)}% • Qty for ₹$risk risk: $qty",
+                    color = C.Muted, fontSize = 12.sp)
+            }
             p.result.lastPrice?.let { Text("Last price: ${it.p2()}", color = C.Muted, fontSize = 12.sp) }
         }
     }
@@ -185,7 +198,7 @@ fun DetailScreen(p: Pick, st: UiState, vm: MainViewModel) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(p.symbol, fontWeight = FontWeight.Bold, fontSize = 24.sp, color = C.Text)
+                        Text(Repository.label(p.symbol), fontWeight = FontWeight.Bold, fontSize = 24.sp, color = C.Text)
                         Spacer(Modifier.width(8.dp))
                         Chip(p.plan.direction.label, dirColor(p.plan.direction))
                     }
@@ -218,9 +231,15 @@ fun DetailScreen(p: Pick, st: UiState, vm: MainViewModel) {
             )
             steps.forEach { Text("• $it", color = C.Text, fontSize = 13.sp, modifier = Modifier.padding(vertical = 2.dp)) }
             Spacer(Modifier.height(8.dp))
-            val qty = floor(st.settings.riskRupees / p.plan.risk).toInt()
-            Text("Position size for ₹${st.settings.riskRupees} risk: $qty shares (≈ ₹${String.format("%,.0f", qty * p.plan.entry)} capital)",
-                color = C.Gold, fontSize = 13.sp)
+            if (Repository.isIndex(p.symbol)) {
+                Text("Index levels: risk ${String.format("%.0f", p.plan.risk)} points, target ${String.format("%.0f", p.plan.risk * Rules.REWARD_R)} points. " +
+                    "An index can't be bought directly — use these levels on the chart to time futures or options.",
+                    color = C.Gold, fontSize = 13.sp)
+            } else {
+                val qty = floor(st.settings.riskRupees / p.plan.risk).toInt()
+                Text("Position size for ₹${st.settings.riskRupees} risk: $qty shares (≈ ₹${String.format("%,.0f", qty * p.plan.entry)} capital)",
+                    color = C.Gold, fontSize = 13.sp)
+            }
             p.result.entryTime?.let {
                 Spacer(Modifier.height(6.dp))
                 Text("Entry triggered at ${timeOfSec(it)} @ ${p.result.fillPrice?.p2()}", color = C.Muted, fontSize = 12.sp)

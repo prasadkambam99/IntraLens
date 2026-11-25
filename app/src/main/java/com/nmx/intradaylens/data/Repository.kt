@@ -42,7 +42,9 @@ data class Snapshot(
     val phase: Phase,
     val picks: List<Pick>,
     val watch: List<WatchItem>,
-    val nifty: IndexQuote?,
+    val indices: List<IndexQuote>,
+    /** Today's opening-range plan for NIFTY 50 and BANK NIFTY. */
+    val indexPicks: List<Pick> = emptyList(),
     val failed: List<String>,
     val updatedAt: Long,
     val modelReport: ModelReport?,
@@ -57,10 +59,16 @@ class Repository private constructor(ctx: Context) {
 
     @Volatile var sessions: Map<String, List<Session>> = emptyMap(); private set
     @Volatile var market: List<Session> = emptyList(); private set
+    @Volatile var indexSessions: Map<String, List<Session>> = emptyMap(); private set
     private val newsCache = HashMap<String, Pair<Long, List<Headline>>>()
 
     companion object {
         const val INDEX = "^NSEI"
+        /** App name -> Yahoo symbol for the two indices. */
+        val INDICES = linkedMapOf("NIFTY" to "^NSEI", "BANKNIFTY" to "^NSEBANK")
+        val INDEX_LABELS = mapOf("NIFTY" to "NIFTY 50", "BANKNIFTY" to "BANK NIFTY")
+        fun isIndex(symbol: String) = symbol in INDICES
+        fun label(symbol: String) = INDEX_LABELS[symbol] ?: symbol
         @Volatile private var inst: Repository? = null
         fun get(ctx: Context) = inst ?: synchronized(this) { inst ?: Repository(ctx).also { inst = it } }
 
@@ -88,7 +96,7 @@ class Repository private constructor(ctx: Context) {
             val settings = store.settings()
             val today = now().toLocalDate()
             val full = forceFull || store.lastFullFetchDay != today.toString()
-            val symbols = settings.universe + INDEX
+            val symbols = settings.universe + INDICES.values
             val done = AtomicInteger(0)
             val failed = java.util.Collections.synchronizedList(mutableListOf<String>())
             val sem = Semaphore(6)
@@ -113,13 +121,15 @@ class Repository private constructor(ctx: Context) {
             if (full && failed.size < symbols.size / 2) store.lastFullFetchDay = today.toString()
 
             market = Indicators.sessions(loaded[INDEX].orEmpty())
+            indexSessions = INDICES.mapValues { (_, y) -> Indicators.sessions(loaded[y].orEmpty()) }
+                .filterValues { it.size > Rules.MIN_HISTORY_DAYS }
             sessions = settings.universe.associateWith { Indicators.sessions(loaded[it].orEmpty()) }
                 .filterValues { it.size > Rules.MIN_HISTORY_DAYS }
 
             // Train once per day on completed sessions (never on today's unfinished data)
             var model = store.loadModel()
             if (model == null || store.modelDay != today.toString() || forceFull) {
-                val samples = Trainer.buildSamples(sessions, market, excludeDate = today)
+                val samples = Trainer.buildSamples(sessions + indexSessions, market, excludeDate = today)
                 Trainer.trainAndEvaluate(samples, sessions.size, settings.topN, settings.minProb)?.let { (m, rep) ->
                     model = m
                     store.saveModel(m, rep)
@@ -137,39 +147,45 @@ class Repository private constructor(ctx: Context) {
             }
 
             val picks = model?.let { Trainer.scanDay(sessionDate, sessions, market, it) }.orEmpty()
+            val indexPicks = model?.let { m -> Trainer.scanDay(sessionDate, indexSessions, market, m) }.orEmpty()
+                .sortedBy { INDICES.keys.indexOf(it.symbol) }
 
             val watch = sessions.mapNotNull { (sym, s) ->
                 val hist = s.filter { it.date != today }
                 Strategy.watchItem(sym, hist, null)
             }.sortedByDescending { it.score }
 
-            val changes = updateJournal(picks, sessionDate == today && phase == Phase.LIVE, settings)
+            val changes = updateJournal(picks, indexPicks, sessionDate == today && phase == Phase.LIVE, settings)
 
-            val nifty = market.takeIf { it.size >= 2 }?.let { m ->
-                val last = m.last()
-                val prevClose = m[m.size - 2].close
-                IndexQuote("NIFTY 50", last.close, (last.close - prevClose) / prevClose * 100)
+            val indices = INDICES.keys.mapNotNull { sym ->
+                indexSessions[sym]?.takeIf { it.size >= 2 }?.let { m ->
+                    val last = m.last()
+                    val prevClose = m[m.size - 2].close
+                    IndexQuote(label(sym), last.close, (last.close - prevClose) / prevClose * 100)
+                }
             }
             store.lastUpdated = System.currentTimeMillis()
             Snapshot(sessionDate, sessionDate == today, if (sessionDate == today) phase else Phase.CLOSED,
-                picks, watch, nifty, failed.toList(), store.lastUpdated, store.loadReport(),
+                picks, watch, indices, indexPicks, failed.toList(), store.lastUpdated, store.loadReport(),
                 market.lastOrNull()?.bars?.lastOrNull()?.t) to changes
         }
 
     /** Save today's top picks once (at/after 9:30) and re-check every saved pick against real prices. */
-    private fun updateJournal(picks: List<Pick>, live: Boolean, settings: Settings): List<StatusChange> {
+    private fun updateJournal(picks: List<Pick>, indexPicks: List<Pick>, live: Boolean, settings: Settings): List<StatusChange> {
         val old = store.journal()
         val list = old.toMutableList()
         val today = now().toLocalDate().toString()
         if (live && list.none { it.date == today }) {
-            picks.filter { it.probability >= settings.minProb }.take(settings.topN).forEach { p ->
+            val chosen = indexPicks.filter { it.probability >= settings.minProb } +
+                picks.filter { it.probability >= settings.minProb }.take(settings.topN)
+            chosen.forEach { p ->
                 list += JournalPick(today, p.symbol, p.plan.direction, p.plan.entry, p.plan.stop, p.plan.target,
                     p.probability, System.currentTimeMillis())
             }
         }
         val updated = list.map { j ->
             if (j.closed) return@map j
-            val day = sessions[j.symbol]?.firstOrNull { it.date.toString() == j.date } ?: return@map j
+            val day = (sessions[j.symbol] ?: indexSessions[j.symbol])?.firstOrNull { it.date.toString() == j.date } ?: return@map j
             val res = Strategy.simulate(day, TradePlan(j.direction, j.entry, j.stop, j.target))
             j.copy(status = res.status, r = res.r, fill = res.fillPrice, exitPrice = res.exitPrice)
         }
@@ -179,11 +195,12 @@ class Repository private constructor(ctx: Context) {
             .map { StatusChange(it, oldByKey[it.date + it.symbol]) }
     }
 
-    fun sessionFor(symbol: String, date: LocalDate): Session? = sessions[symbol]?.firstOrNull { it.date == date }
+    fun sessionFor(symbol: String, date: LocalDate): Session? =
+        (sessions[symbol] ?: indexSessions[symbol])?.firstOrNull { it.date == date }
 
     suspend fun news(symbol: String): List<Headline> = withContext(Dispatchers.IO) {
         newsCache[symbol]?.let { (t, h) -> if (System.currentTimeMillis() - t < 15 * 60_000) return@withContext h }
-        val h = runCatching { MarketApi.news(symbol) }.getOrDefault(emptyList())
+        val h = runCatching { MarketApi.news(if (isIndex(symbol)) label(symbol) else symbol) }.getOrDefault(emptyList())
         newsCache[symbol] = System.currentTimeMillis() to h
         h
     }

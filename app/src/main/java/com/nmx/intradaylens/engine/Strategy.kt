@@ -96,21 +96,21 @@ object Strategy {
             (room / atrPct).coerceIn(-5.0, 5.0)
         )
 
-        val reasons = buildReasons(dir, gap, volRatio, prevClose, ema20, rsi, mkt, room, orRange / orClose, atrPct)
+        val reasons = buildReasons(dir, gap, volRatio, orVol > 0, prevClose, ema20, rsi, mkt, room, orRange / orClose, atrPct)
         return Setup(plan, f, reasons)
     }
 
     private fun pct(x: Double) = String.format("%.2f%%", x * 100)
 
     private fun buildReasons(
-        dir: Direction, gap: Double, volRatio: Double, prevClose: Double, ema20: Double, rsi: Double,
+        dir: Direction, gap: Double, volRatio: Double, hasVolume: Boolean, prevClose: Double, ema20: Double, rsi: Double,
         mkt: MarketContext, room: Double, orRangePct: Double, atrPct: Double
     ): List<String> {
         val r = mutableListOf<String>()
         val up = dir == Direction.LONG
         r += "First 15-min range: ${pct(orRangePct)} (daily ATR ${pct(atrPct)})"
         if (abs(gap) >= 0.003) r += "Opened with a gap ${if (gap > 0) "up" else "down"} of ${pct(abs(gap))}"
-        r += when {
+        if (hasVolume) r += when {
             volRatio >= 1.5 -> "Strong opening volume: ${String.format("%.1f", volRatio)}x normal"
             volRatio <= 0.7 -> "Weak opening volume: ${String.format("%.1f", volRatio)}x normal"
             else -> "Normal opening volume (${String.format("%.1f", volRatio)}x)"

@@ -74,7 +74,7 @@ class MainActivity : ComponentActivity() {
                     topBar = {
                         TopAppBar(
                             title = {
-                                Text(if (selected != null) selected.symbol else "Intraday Lens", fontWeight = FontWeight.Bold)
+                                Text(if (selected != null) com.nmx.intradaylens.data.Repository.label(selected.symbol) else "Intraday Lens", fontWeight = FontWeight.Bold)
                             },
                             navigationIcon = {
                                 if (selected != null) IconButton(onClick = { vm.select(null) }) {
