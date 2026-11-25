@@ -14,7 +14,7 @@ import java.io.File
 data class Settings(
     val universe: List<String>,
     val topN: Int = 8,
-    val minProb: Double = 0.55,
+    val minProb: Double = 0.45,
     val riskRupees: Int = 500,
     val notifications: Boolean = true
 ) {
@@ -57,7 +57,7 @@ class Store(private val ctx: Context) {
         universe = prefs.getString("universe", null)?.split(",")?.map { it.trim().uppercase() }?.filter { it.isNotEmpty() }
             ?: Settings.DEFAULT_UNIVERSE,
         topN = prefs.getInt("topN", 8),
-        minProb = prefs.getFloat("minProb", 0.55f).toDouble(),
+        minProb = prefs.getFloat("minProb", 0.45f).toDouble(),
         riskRupees = prefs.getInt("risk", 500),
         notifications = prefs.getBoolean("notify", true)
     )

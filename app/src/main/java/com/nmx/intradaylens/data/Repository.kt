@@ -45,7 +45,9 @@ data class Snapshot(
     val nifty: IndexQuote?,
     val failed: List<String>,
     val updatedAt: Long,
-    val modelReport: ModelReport?
+    val modelReport: ModelReport?,
+    /** Start time (epoch sec) of the newest 5-min bar received for NIFTY. */
+    val dataTime: Long? = null
 )
 
 data class StatusChange(val pick: JournalPick, val old: JournalPick?)
@@ -150,7 +152,8 @@ class Repository private constructor(ctx: Context) {
             }
             store.lastUpdated = System.currentTimeMillis()
             Snapshot(sessionDate, sessionDate == today, if (sessionDate == today) phase else Phase.CLOSED,
-                picks, watch, nifty, failed.toList(), store.lastUpdated, store.loadReport()) to changes
+                picks, watch, nifty, failed.toList(), store.lastUpdated, store.loadReport(),
+                market.lastOrNull()?.bars?.lastOrNull()?.t) to changes
         }
 
     /** Save today's top picks once (at/after 9:30) and re-check every saved pick against real prices. */

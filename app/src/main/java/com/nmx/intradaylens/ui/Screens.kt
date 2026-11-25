@@ -92,7 +92,8 @@ fun TodayScreen(st: UiState, vm: MainViewModel) {
                 } else if (snap != null) {
                     Spacer(Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Updated ${timeOf(snap.updatedAt)}", color = C.Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                        val asOf = snap.dataTime?.let { " • Prices as of ${timeOfSec(it + 300)}" } ?: ""
+                        Text("Updated ${timeOf(snap.updatedAt)}$asOf", color = C.Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
                         TextButton(onClick = { vm.refresh() }) { Text("Refresh") }
                     }
                 }
@@ -106,31 +107,42 @@ fun TodayScreen(st: UiState, vm: MainViewModel) {
             )
         }
         if (snap != null) {
-            val top = snap.picks.filter { it.probability >= st.settings.minProb }.take(st.settings.topN)
-            item { SectionTitle(if (snap.isToday) "TODAY'S PICKS (${top.size})" else "PICKS FOR ${snap.sessionDate.format(dayFmt).uppercase()}") }
+            val strong = snap.picks.filter { it.probability >= st.settings.minProb }.take(st.settings.topN)
+            // Never show an empty list: if nothing passes the filter, show the best 5 with a clear warning.
+            val top = strong.ifEmpty { snap.picks.take(5) }
+            val weakOnly = strong.isEmpty() && top.isNotEmpty()
+            item {
+                SectionTitle(
+                    when {
+                        weakOnly -> "BEST OF THE SCAN (BELOW YOUR ${st.settings.minProb.pct0()} MINIMUM)"
+                        snap.isToday -> "TODAY'S PICKS (${top.size})"
+                        else -> "PICKS FOR ${snap.sessionDate.format(dayFmt).uppercase()}"
+                    }
+                )
+            }
             if (top.isEmpty()) item {
+                AppCard { Text("No scan yet. Picks appear at 9:30 AM once the first 15 minutes of trading are done.", color = C.Muted) }
+            }
+            if (weakOnly) item {
                 AppCard {
-                    Text(
-                        if (snap.picks.isEmpty()) "No scan yet. Picks appear at 9:30 AM once the first 15 minutes of trading are done."
-                        else "No stock reached your minimum confidence (${st.settings.minProb.pct0()}). That is normal on quiet days — sitting out is also a decision.",
-                        color = C.Muted
-                    )
+                    Text("No stock reached your minimum confidence. These are the strongest ones anyway — lower conviction, consider sitting out.",
+                        color = C.Gold, fontSize = 13.sp)
                 }
             }
-            items(top, key = { "t" + it.symbol }) { PickCard(it, st.settings.riskRupees) { vm.select(it) } }
+            items(top, key = { "t" + it.symbol }) { PickCard(it, st.settings.riskRupees, minProb = st.settings.minProb) { vm.select(it) } }
             item {
                 TextButton(onClick = { showAll = !showAll }, modifier = Modifier.padding(horizontal = 8.dp)) {
                     Text(if (showAll) "Hide other stocks" else "Show all ${snap.picks.size} scanned stocks")
                 }
             }
-            if (showAll) items(snap.picks.drop(top.size), key = { "a" + it.symbol }) { PickCard(it, st.settings.riskRupees, compact = true) { vm.select(it) } }
+            if (showAll) items(snap.picks.drop(top.size), key = { "a" + it.symbol }) { PickCard(it, st.settings.riskRupees, compact = true, minProb = st.settings.minProb) { vm.select(it) } }
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
 @Composable
-fun PickCard(p: Pick, risk: Int, compact: Boolean = false, onClick: () -> Unit) {
+fun PickCard(p: Pick, risk: Int, compact: Boolean = false, minProb: Double = 0.0, onClick: () -> Unit) {
     AppCard(Modifier.clickable { onClick() }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -144,6 +156,8 @@ fun PickCard(p: Pick, risk: Int, compact: Boolean = false, onClick: () -> Unit) 
                     Chip(p.result.status.label + if (p.result.status == TradeStatus.ACTIVE || p.result.status == TradeStatus.WIN ||
                         p.result.status == TradeStatus.LOSS || p.result.status == TradeStatus.TIME_EXIT) String.format(" (%+.1fR)", p.result.r) else "",
                         statusColor(p.result.status))
+                    if (p.probability < 0.40) { Spacer(Modifier.width(6.dp)); Chip("Below break-even", C.Red) }
+                    else if (p.probability < minProb) { Spacer(Modifier.width(6.dp)); Chip("Low confidence", C.Gold) }
                 }
             }
             ProbRing(p.probability, if (compact) 44 else 58)
