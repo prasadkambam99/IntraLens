@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- candles -->
+    <path android:fillColor="#26A69A" android:pathData="M36,50h8v20h-8z" />
+    <path android:fillColor="#26A69A" android:pathData="M39.5,44h1v32h-1z" />
+    <path android:fillColor="#EF5350" android:pathData="M50,56h8v14h-8z" />
+    <path android:fillColor="#EF5350" android:pathData="M53.5,52h1v22h-1z" />
+    <path android:fillColor="#26A69A" android:pathData="M64,40h8v24h-8z" />
+    <path android:fillColor="#26A69A" android:pathData="M67.5,34h1v34h-1z" />
+    <!-- trend line -->
+    <path android:strokeColor="#FFC94D" android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M32,74 L48,62 L58,66 L76,40" />
+</vector>
