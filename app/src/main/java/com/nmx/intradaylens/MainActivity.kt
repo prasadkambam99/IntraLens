@@ -131,6 +131,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        vm.setVisible(true)
         LiveService.startIfNeeded(this)
+    }
+
+    override fun onPause() {
+        vm.setVisible(false)
+        super.onPause()
     }
 }

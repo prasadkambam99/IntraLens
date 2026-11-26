@@ -38,7 +38,24 @@ object Strategy {
         "India VIX change"
     )
 
-    class Setup(val plan: TradePlan, val features: DoubleArray, val reasons: List<String>, val orLow: Double, val orHigh: Double)
+    class Setup(val plan: TradePlan, val features: DoubleArray, val reasons: List<String>, val orLow: Double, val orHigh: Double, val rule: PlanRule)
+
+    /** Average high-low of 5-minute candles over the last few sessions (the "normal noise"). */
+    fun avgFiveMinRange(history: List<Session>, days: Int = 3): Double {
+        val bars = history.takeLast(days).flatMap { s ->
+            if (s.barSeconds >= 300) s.bars
+            else s.bars.chunked(5).map { c -> Candle(c.first().t, c.first().o, c.maxOf { it.h }, c.minOf { it.l }, c.last().c, c.sumOf { it.v }) }
+        }
+        return if (bars.isEmpty()) 0.0 else bars.map { it.h - it.l }.average()
+    }
+
+    /** Turn a "smart" rule into today's fixed number of points. */
+    fun resolveRule(rule: PlanRule, history: List<Session>, price: Double): PlanRule {
+        val m = rule.atrMult ?: return rule
+        val noise = avgFiveMinRange(history)
+        val risk = (m * noise).coerceIn(price * 0.0005, price * 0.006)
+        return rule.copy(fixedRiskPoints = Math.round(risk).toDouble().coerceAtLeast(1.0), atrMult = null)
+    }
 
     /** Trigger level for a direction (just beyond the opening range). */
     private fun trigger(orh: Double, orl: Double, dir: Direction) =
@@ -52,8 +69,9 @@ object Strategy {
         return (entry - s * risk) to (entry + s * risk * rule.rewardR)
     }
 
-    fun setup(history: List<Session>, today: Session, dir: Direction, mkt: MarketContext, rule: PlanRule = PlanRule.STOCK): Setup? {
+    fun setup(history: List<Session>, today: Session, dir: Direction, mkt: MarketContext, rule0: PlanRule = PlanRule.STOCK): Setup? {
         if (history.size < Rules.MIN_HISTORY_DAYS || !today.orComplete) return null
+        val rule = resolveRule(rule0, history, history.last().close)
         val s = dir.sign.toDouble()
         val prev = history.last()
         val prevClose = prev.close
@@ -107,7 +125,7 @@ object Strategy {
         )
 
         val reasons = buildReasons(dir, gap, volRatio, orVol > 0, prevClose, ema20, rsi, mkt, room, orRange / orClose, atrPct)
-        return Setup(plan, f, reasons, orl, orh)
+        return Setup(plan, f, reasons, orl, orh, rule)
     }
 
     private fun pct(x: Double) = String.format("%.2f%%", x * 100)
@@ -167,6 +185,7 @@ object Strategy {
         var target = plan.target
         var risk = plan.risk
         var moved = false
+        var best = 0.0
         var last = bars.last().c
         var volSum = bars.take(start).sumOf { it.v }.toDouble()
         var volN = start
@@ -198,6 +217,7 @@ object Strategy {
                         val lv = levels(fill, plan.direction, orHigh, orLow, rule)
                         stop = lv.first; target = lv.second
                         risk = abs(fill - stop)
+                        best = fill
                     }
                 }
                 if (blockDone) blockVol = 0L
@@ -208,15 +228,26 @@ object Strategy {
             val tgtHit = if (long) b.h >= target else b.l <= target
             if (stopHit) {
                 val exit = if (long) min(stop, b.o) else max(stop, b.o)
-                val st = if (moved) TradeStatus.BREAKEVEN else TradeStatus.LOSS
-                return TradeResult(st, entryT, fill, b.t, exit, rOf(exit), b.c, stop, target, moved)
+                val rr = rOf(exit)
+                val st = when {
+                    rr > 0.05 -> TradeStatus.TRAIL_EXIT
+                    moved -> TradeStatus.BREAKEVEN
+                    else -> TradeStatus.LOSS
+                }
+                return TradeResult(st, entryT, fill, b.t, exit, rr, b.c, stop, target, moved)
             }
             if (tgtHit) {
                 val exit = if (long) max(target, b.o) else min(target, b.o)
                 return TradeResult(TradeStatus.WIN, entryT, fill, b.t, exit, rOf(exit), b.c, stop, target, moved)
             }
-            // No-loss stop: once price has gone halfway to target, move stop to entry (applies from next bar)
-            if (!moved) {
+            if (rule.trail) {
+                // Trailing stop: follow the best price, keep the same distance, never move back (applies from next bar)
+                best = if (long) max(best, b.h) else min(best, b.l)
+                val cand = best - plan.direction.sign * risk
+                if (if (long) cand > stop else cand < stop) stop = cand
+                if (if (long) stop >= fill else stop <= fill) moved = true
+            } else if (!moved) {
+                // No-loss stop: once price has gone halfway to target, move stop to entry (applies from next bar)
                 val half = fill + plan.direction.sign * abs(target - fill) * Rules.BREAKEVEN_AT
                 if (if (long) b.h >= half else b.l <= half) { moved = true; stop = fill }
             }

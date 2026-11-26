@@ -11,7 +11,8 @@ class Sample(
     val result: TradeResult
 ) {
     val triggered get() = result.status.traded
-    val label get() = if (result.status == TradeStatus.WIN) 1 else 0
+    /** 1 = the trade made money (target hit, or trailing stop locked a profit). */
+    val label get() = if (result.status == TradeStatus.WIN || (result.status == TradeStatus.TRAIL_EXIT && result.r > 0)) 1 else 0
 }
 
 data class Bucket(val label: String, val count: Int, val avgPredicted: Double, val actualWinRate: Double)
@@ -64,7 +65,7 @@ object Trainer {
                 val mkt = market.context(sym, day.date)
                 for (dir in Direction.values()) {
                     val st = Strategy.setup(hist, day, dir, mkt, rule) ?: continue
-                    out += Sample(sym, day.date, dir, st.features, Strategy.simulate(day, st.plan, st.orLow, st.orHigh, rule))
+                    out += Sample(sym, day.date, dir, st.features, Strategy.simulate(day, st.plan, st.orLow, st.orHigh, st.rule))
                 }
             }
         }
@@ -188,7 +189,7 @@ object Trainer {
             }.maxByOrNull { it.second } ?: continue
             val (st, p) = best
             picks += Pick(sym, date, st.plan, p, st.reasons, st.features,
-                Strategy.simulate(day, st.plan, st.orLow, st.orHigh, rule), Indicators.levels(hist), st.orLow, st.orHigh, rule)
+                Strategy.simulate(day, st.plan, st.orLow, st.orHigh, st.rule), Indicators.levels(hist), st.orLow, st.orHigh, st.rule)
         }
         return picks.sortedByDescending { it.probability }
     }

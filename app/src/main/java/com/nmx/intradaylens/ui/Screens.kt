@@ -92,8 +92,10 @@ fun TodayScreen(st: UiState, vm: MainViewModel) {
                 }
             } else if (snap != null) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val asOf = snap.dataTime?.let { "Prices as of ${timeOfSec(it + 60)}" } ?: ""
-                    Text(if (snap.isToday) asOf else "Showing ${snap.sessionDate.format(dayFmt)} (last session)",
+                    val auto = if (step == DayStep.ENTRY || step == DayStep.MANAGE || step == DayStep.EXIT || step == DayStep.OPENING)
+                        "● Live • auto-updates every 30 s • " else ""
+                    val asOf = snap.dataTime?.let { "prices ${timeOfSec(it + 60)}" } ?: ""
+                    Text(if (snap.isToday) auto + asOf else "Showing ${snap.sessionDate.format(dayFmt)} (last session)",
                         color = C.Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
                     TextButton(onClick = { vm.refresh() }) { Text("Refresh") }
                 }
@@ -169,12 +171,14 @@ fun ActionCard(p: Pick, st: UiState, blockReason: String?, isToday: Boolean, big
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 LabelValue(if (p.plan.direction == Direction.LONG) "Entry above" else "Entry below", px(p.plan.entry), C.Gold)
-                LabelValue(if (p.result.movedToCost) "Stop (moved)" else "Exit if", px(stop), C.Red)
+                LabelValue(if (p.result.stop != null && p.result.stop != p.plan.stop && p.result.status == TradeStatus.ACTIVE && p.rule.trail) "Stop (trailing)"
+                    else if (p.result.movedToCost) "Stop (moved)" else "Exit if", px(stop), C.Red)
                 LabelValue("Target", px(target), C.Green)
             }
             Spacer(Modifier.height(4.dp))
             if (idx) {
-                Text("SL ${String.format("%.0f", abs(p.plan.entry - p.plan.stop))} pts • Target ${String.format("%.0f", p.plan.reward)} pts • exit by 3:15 PM",
+                Text("SL ${String.format("%.0f", abs(p.plan.entry - p.plan.stop))} pts • Target ${String.format("%.0f", p.plan.reward)} pts" +
+                    (if (p.rule.trail) " • trailing stop" else "") + " • exit by 3:15 PM",
                     color = C.Muted, fontSize = 12.sp)
             } else {
                 val qty = floor(st.settings.riskRupees / p.plan.risk).toInt()
@@ -233,7 +237,8 @@ fun DetailScreen(p: Pick, st: UiState, vm: MainViewModel) {
                 "4. Stop-loss: exit if ${if (idx) Repository.label(p.symbol) else "price"} reaches ${px(stop)}" +
                     if (idx) " (${String.format("%.0f", abs(p.plan.entry - p.plan.stop))} pts)." else ".",
                 "5. Target: exit at ${px(target)}" + if (idx) " (${String.format("%.0f", p.plan.reward)} pts)." else ".",
-                "6. Halfway to target → move stop-loss to your entry price (no-loss). The app tells you.",
+                if (p.rule.trail) "6. Trailing stop: as price moves your way, move the stop-loss with it (same distance behind). Never move it back. The app tells you each new level."
+                else "6. Halfway to target → move stop-loss to your entry price (no-loss). The app tells you.",
                 "7. Exit everything at ${Rules.EXIT_TIME.hm()} if nothing hit."
             )
             steps.forEach { Text(it, color = C.Text, fontSize = 13.sp, modifier = Modifier.padding(vertical = 3.dp)) }
@@ -484,6 +489,7 @@ fun SettingsScreen(st: UiState, vm: MainViewModel, openWatchlist: () -> Unit, op
     var live by remember(s) { mutableStateOf(s.liveAlerts) }
     var notify by remember(s) { mutableStateOf(s.notifications) }
     var topStocks by remember(s) { mutableStateOf(s.topStocks.toFloat()) }
+    var smartStop by remember(s) { mutableStateOf(s.smartIndexStop) }
     var universe by remember(s) { mutableStateOf(s.universe.joinToString(", ")) }
     var showAdvanced by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -506,7 +512,8 @@ fun SettingsScreen(st: UiState, vm: MainViewModel, openWatchlist: () -> Unit, op
             OutlinedTextField(risk, { risk = it.filter(Char::isDigit) }, label = { Text("Risk per stock trade (₹)") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
-            Row {
+            SwitchRow("Smart index stop-loss", "NIFTY / BANK NIFTY stop based on today's normal movement (recommended). Off = fixed points below.", smartStop) { smartStop = it }
+            if (!smartStop) Row {
                 OutlinedTextField(idxRisk, { idxRisk = it.filter(Char::isDigit) }, label = { Text("Index SL (pts)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(8.dp))
@@ -524,7 +531,7 @@ fun SettingsScreen(st: UiState, vm: MainViewModel, openWatchlist: () -> Unit, op
                     indexRiskPts = (idxRisk.toIntOrNull() ?: 20).coerceIn(5, 500),
                     indexTargetPts = (idxTarget.toIntOrNull() ?: 20).coerceIn(5, 1000),
                     strictMode = strict, safeDayFilter = safeDay, dailyLossLimit = lossLimit.toInt(),
-                    liveAlerts = live, topStocks = topStocks.toInt(),
+                    liveAlerts = live, topStocks = topStocks.toInt(), smartIndexStop = smartStop,
                     universe = universe.split(",", "\n", " ").map { it.trim().uppercase() }.filter { it.isNotEmpty() }.distinct()
                 )
             )

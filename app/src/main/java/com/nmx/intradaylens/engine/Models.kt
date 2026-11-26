@@ -54,11 +54,12 @@ enum class TradeStatus(val label: String) {
     WIN("Target hit"),
     LOSS("Stop-loss hit"),
     BREAKEVEN("Exited at entry price"),
+    TRAIL_EXIT("Trailing stop exit (profit)"),
     TIME_EXIT("Closed at 3:15 PM"),
     NOT_TRIGGERED("No entry today");
 
-    val done get() = this == WIN || this == LOSS || this == BREAKEVEN || this == TIME_EXIT || this == NOT_TRIGGERED
-    val traded get() = this == WIN || this == LOSS || this == BREAKEVEN || this == TIME_EXIT || this == ACTIVE
+    val done get() = this == WIN || this == LOSS || this == BREAKEVEN || this == TRAIL_EXIT || this == TIME_EXIT || this == NOT_TRIGGERED
+    val traded get() = this == WIN || this == LOSS || this == BREAKEVEN || this == TRAIL_EXIT || this == TIME_EXIT || this == ACTIVE
 }
 
 /** Simple label instead of a raw percentage. */
@@ -99,12 +100,20 @@ object Rules {
 /**
  * How stop-loss and target are placed.
  * Stocks: stop at the other side of the opening range (0.35%–1.2%), target 1.5x risk.
- * Indices: fixed points, e.g. 20 points stop and 20 points target.
+ * Indices "smart": stop = [atrMult] x the normal size of a 5-minute candle (recent days), so normal noise doesn't hit it.
+ * Indices "fixed": fixed points, e.g. 20 points stop and 20 points target.
+ * [trail] = trailing stop: after entry the stop follows the best price, keeping the same distance; it never moves back.
  */
-data class PlanRule(val fixedRiskPoints: Double? = null, val rewardR: Double = Rules.REWARD_R) {
+data class PlanRule(
+    val fixedRiskPoints: Double? = null,
+    val rewardR: Double = Rules.REWARD_R,
+    val atrMult: Double? = null,
+    val trail: Boolean = false
+) {
     companion object {
         val STOCK = PlanRule()
-        fun points(risk: Double, target: Double) = PlanRule(risk, target / risk)
+        fun points(risk: Double, target: Double, trail: Boolean = false) = PlanRule(risk, target / risk, trail = trail)
+        fun smart(mult: Double = 1.5, rewardR: Double = 1.5) = PlanRule(null, rewardR, mult, trail = true)
     }
 }
 
@@ -137,7 +146,7 @@ data class TradeResult(
     /** Real levels once entered (from the fill price). */
     val stop: Double? = null,
     val target: Double? = null,
-    /** True once price went halfway to target and the stop was moved to the entry price. */
+    /** True once the stop is at or beyond the entry price (no-loss / trailing). */
     val movedToCost: Boolean = false
 )
 

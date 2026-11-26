@@ -108,7 +108,9 @@ class Repository private constructor(ctx: Context) {
         }
     }
 
-    private fun indexRule(s: Settings) = PlanRule.points(s.indexRiskPts.toDouble(), s.indexTargetPts.toDouble())
+    private fun indexRule(s: Settings) =
+        if (s.smartIndexStop) PlanRule.smart()
+        else PlanRule.points(s.indexRiskPts.toDouble(), s.indexTargetPts.toDouble(), trail = true)
 
     suspend fun refresh(
         progress: (Int, Int) -> Unit = { _, _ -> },
@@ -278,7 +280,12 @@ class Repository private constructor(ctx: Context) {
         val updated = list.map { j -> resimulate(j) }
         store.saveJournal(updated)
         val oldByKey = old.associateBy { it.key }
-        return updated.filter { n -> oldByKey[n.key]?.let { it.status != n.status || it.movedToCost != n.movedToCost } ?: true }
+        return updated.filter { n ->
+            oldByKey[n.key]?.let {
+                it.status != n.status || it.movedToCost != n.movedToCost ||
+                    (n.trail && n.status == TradeStatus.ACTIVE && kotlin.math.abs(n.stop - it.stop) >= 0.25 * n.riskPoints)
+            } ?: true
+        }
             .map { StatusChange(it, oldByKey[it.key]) }
     }
 
@@ -286,7 +293,7 @@ class Repository private constructor(ctx: Context) {
         date = p.date.toString(), symbol = p.symbol, direction = p.plan.direction,
         entry = p.plan.entry, stop = p.plan.stop, target = p.plan.target, probability = p.probability,
         recordedAt = System.currentTimeMillis(), orLow = p.orLow, orHigh = p.orHigh,
-        fixedRiskPts = p.rule.fixedRiskPoints, rewardR = p.rule.rewardR, taken = taken
+        fixedRiskPts = p.rule.fixedRiskPoints, rewardR = p.rule.rewardR, taken = taken, trail = p.rule.trail
     )
 
     private fun resimulate(j: JournalPick): JournalPick {

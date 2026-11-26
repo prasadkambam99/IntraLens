@@ -61,7 +61,7 @@ fun Double.pct0() = String.format("%.0f%%", this * 100)
 fun dirColor(d: Direction) = if (d == Direction.LONG) C.Green else C.Red
 
 fun statusColor(s: TradeStatus) = when (s) {
-    TradeStatus.WIN -> C.Green
+    TradeStatus.WIN, TradeStatus.TRAIL_EXIT -> C.Green
     TradeStatus.LOSS -> C.Red
     TradeStatus.ACTIVE -> C.Blue
     TradeStatus.TIME_EXIT -> C.Gold

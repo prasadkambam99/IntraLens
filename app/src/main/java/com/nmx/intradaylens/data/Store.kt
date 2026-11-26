@@ -30,7 +30,9 @@ data class Settings(
     /** Keep a live connection during market hours for instant loud alerts. */
     val liveAlerts: Boolean = true,
     /** How many stocks to show / record per day. */
-    val topStocks: Int = 3
+    val topStocks: Int = 3,
+    /** Index stop-loss from today's normal 5-min movement (true) or fixed points (false). Both use a trailing stop. */
+    val smartIndexStop: Boolean = true
 ) {
     companion object {
         /** Large, liquid NSE stocks (NIFTY 50 style list). Edit in Settings. */
@@ -68,11 +70,15 @@ data class JournalPick(
     /** User tapped "I took this trade". */
     val taken: Boolean = false,
     val entryTime: Long? = null,
-    val exitTime: Long? = null
+    val exitTime: Long? = null,
+    /** Trailing stop on (stop follows the price). */
+    val trail: Boolean = false
 ) {
     val closed get() = status.done
     val key get() = date + "|" + symbol
-    val rule get() = PlanRule(fixedRiskPts, rewardR)
+    val rule get() = PlanRule(fixedRiskPts, rewardR, trail = trail)
+    /** Initial risk in price points. */
+    val riskPoints get() = fixedRiskPts ?: (kotlin.math.abs(target - entry) / rewardR)
     val plan get() = TradePlan(direction, entry, stop, target)
     val canSimulate get() = orLow > 0 && orHigh > 0
 }
@@ -93,7 +99,8 @@ class Store(private val ctx: Context) {
         safeDayFilter = prefs.getBoolean("safeDay", true),
         dailyLossLimit = prefs.getInt("lossLimit", 2),
         liveAlerts = prefs.getBoolean("live", true),
-        topStocks = prefs.getInt("topStocks", 3)
+        topStocks = prefs.getInt("topStocks", 3),
+        smartIndexStop = prefs.getBoolean("smartStop", true)
     )
 
     fun saveSettings(s: Settings) {
@@ -108,6 +115,7 @@ class Store(private val ctx: Context) {
             .putInt("lossLimit", s.dailyLossLimit)
             .putBoolean("live", s.liveAlerts)
             .putInt("topStocks", s.topStocks)
+            .putBoolean("smartStop", s.smartIndexStop)
             .apply()
     }
 
@@ -223,7 +231,8 @@ class Store(private val ctx: Context) {
                     movedToCost = o.optBoolean("moved", false),
                     taken = o.optBoolean("taken", false),
                     entryTime = if (o.has("et")) o.getLong("et") else null,
-                    exitTime = if (o.has("xt")) o.getLong("xt") else null
+                    exitTime = if (o.has("xt")) o.getLong("xt") else null,
+                    trail = o.optBoolean("trail", false)
                 )
             }
         }.getOrDefault(emptyList())
@@ -242,6 +251,7 @@ class Store(private val ctx: Context) {
                 j.fixedRiskPts?.let { put("fixed", it) }
                 put("rr", j.rewardR); put("moved", j.movedToCost); put("taken", j.taken)
                 j.entryTime?.let { put("et", it) }; j.exitTime?.let { put("xt", it) }
+                put("trail", j.trail)
             })
         }
         journalFile.writeText(a.toString())

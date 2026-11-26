@@ -9,6 +9,7 @@ import com.nmx.intradaylens.engine.Strength
 import com.nmx.intradaylens.engine.TradeStatus
 import java.time.Instant
 import java.time.ZonedDateTime
+import kotlin.math.abs
 
 enum class ActionKind { WAIT, BUY_NOW, HOLD, EXIT_NOW, DONE_WIN, DONE_LOSS, DONE_EVEN, DONE_TIME, NO_ENTRY, SKIP }
 
@@ -76,6 +77,9 @@ object Actions {
                         if (idx) "Buy now" else if (pick.plan.direction == Direction.LONG) "Buy now" else "Sell now",
                         (opt?.text?.substringBefore(" (") ?: "Entry ${p(r.fillPrice ?: pick.plan.entry)}") +
                             " • Exit if ${p(stop)} • Target ${p(target)}")
+                    pick.rule.trail && r.fillPrice != null && abs(stop - r.fillPrice) < pick.rule.fixedRiskPoints.let { (it ?: 0.0) - 0.5 } ->
+                        Action(ActionKind.HOLD, if (r.movedToCost) "Hold — profit locked" else "Hold — stop moved",
+                            "Trailing stop now ${p(stop)} ${if (pick.plan.direction == Direction.LONG) "↑" else "↓"} • Target ${p(target)}")
                     r.movedToCost -> Action(ActionKind.HOLD, "Hold — no-loss stop",
                         "Move your stop-loss to ${p(r.fillPrice ?: pick.plan.entry)} (your entry). Target ${p(target)}.")
                     else -> Action(ActionKind.HOLD, "Hold", "Entered ${r.entryTime?.let { hm(it) } ?: ""} • Exit if ${p(stop)} • Target ${p(target)}")
@@ -84,6 +88,7 @@ object Actions {
             TradeStatus.WIN -> Action(ActionKind.DONE_WIN, "Done: target hit", doneLine(pick))
             TradeStatus.LOSS -> Action(ActionKind.DONE_LOSS, "Done: stop-loss hit", doneLine(pick))
             TradeStatus.BREAKEVEN -> Action(ActionKind.DONE_EVEN, "Done: exited at cost", doneLine(pick))
+            TradeStatus.TRAIL_EXIT -> Action(ActionKind.DONE_WIN, "Done: profit locked", "Trailing stop exit • " + doneLine(pick))
             TradeStatus.TIME_EXIT -> Action(ActionKind.DONE_TIME, "Done: closed at 3:15", doneLine(pick))
             TradeStatus.NOT_TRIGGERED -> Action(ActionKind.NO_ENTRY, "No entry today", "Price never confirmed the breakout before 1:00 PM.")
             TradeStatus.WAITING -> when {

@@ -89,6 +89,10 @@ object Alerts {
                     notify(ctx, id, CH_LOUD, "$verb: ${name(p)}",
                         "Entry ${fmt(p.fill ?: p.entry)} • Exit if ${fmt(p.stop)} • Target ${fmt(p.target)}", loud = true)
                 }
+            } else if (p.trail && p.status == TradeStatus.ACTIVE && c.old?.status == TradeStatus.ACTIVE && c.old?.stop != p.stop) {
+                val up = p.direction == Direction.LONG
+                notify(ctx, id, CH_INFO, "${name(p)}: stop moved ${if (up) "up" else "down"} to ${fmt(p.stop)}",
+                    if (p.movedToCost) "Profit locked — this trade can't lose now." else "Your risk is smaller now.")
             } else if (c.old?.movedToCost == false && p.movedToCost && p.status == TradeStatus.ACTIVE) {
                 notify(ctx, id, CH_INFO, "${name(p)}: move stop-loss to entry", "Set stop-loss to ${fmt(p.fill ?: p.entry)}. Now this trade can't lose.")
             } else if (p.status != c.old?.status) {
@@ -96,6 +100,7 @@ object Alerts {
                     TradeStatus.WIN -> "Target ${fmt(p.target)} reached ✅"
                     TradeStatus.LOSS -> "Stop-loss ${fmt(p.stop)} hit ❌"
                     TradeStatus.BREAKEVEN -> "Exited at entry price (no loss)"
+                    TradeStatus.TRAIL_EXIT -> "Trailing stop hit at ${fmt(p.exitPrice ?: p.stop)} — profit locked ✅"
                     TradeStatus.TIME_EXIT -> "Closed at 3:15 PM"
                     TradeStatus.NOT_TRIGGERED -> null
                     else -> null

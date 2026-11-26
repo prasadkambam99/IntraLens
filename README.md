@@ -25,7 +25,9 @@ A personal Android app for researching intraday trades on NIFTY 50, BANK NIFTY a
 **Strong**, **Good**, **Weak** and **Skip** show how far the AI's chance is above break-even. Only Strong and Good can become **Buy now**. With **Strict mode** on in Settings, only Strong can.
 
 ## NIFTY and BANK NIFTY
-* The stop-loss and target are fixed at 20 points each by default. You can change both in Settings.
+* **Smart stop-loss (default):** every day the app measures how much a normal 5-minute candle moves, and puts the stop 1.5× outside that noise. That's typically about 20–30 points for NIFTY and 60–90 for BANK NIFTY. The target is 1.5× the stop.
+* **Trailing stop:** after entry, the stop follows the price at the same distance and never moves back. You get an alert each time it moves. A trade that runs your way can't end in a big loss.
+* You can turn the smart stop off in Settings and use fixed points instead.
 * A BUY signal shows as **CALL (CE)** and a SELL signal as **PUT (PE)**. The suggested strike is the one nearest the price (at the money).
 * The levels are on the **index chart**. An at-the-money option moves roughly half as many points as the index.
 
@@ -41,6 +43,9 @@ A personal Android app for researching intraday trades on NIFTY 50, BANK NIFTY a
 * **Daily loss limit:** after 2 stop-losses, the app says "Stop trading today". You can change the number in Settings.
 * **No-loss stop:** the app tells you when to move your stop-loss to your entry price.
 * **Event warnings:** RBI policy, Budget, Fed or company results news shows a warning.
+
+## Auto-refresh
+While the app is open, it updates itself every 30 seconds during market hours and every 5 minutes otherwise. You don't need to tap Refresh.
 
 ## Other features
 * **Results tab:** every pick is saved at 9:30 AM, before anyone knows the outcome. Tap **"I took this trade"** to also track **My trades** separately.

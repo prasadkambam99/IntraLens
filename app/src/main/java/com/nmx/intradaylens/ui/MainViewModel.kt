@@ -39,17 +39,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var refreshJob: Job? = null
     private var newsJob: Job? = null
 
+    @Volatile private var visible = true
+    private var lastAuto = 0L
+
     init {
         refresh()
-        // While the app is open during market hours, refresh every 60 seconds (fast "live" mode)
+        // Auto-refresh while the app is on screen: every 30 s in market hours, every 5 min otherwise. No need to tap Refresh.
         viewModelScope.launch {
             while (isActive) {
-                delay(60_000L)
+                delay(5_000L)
+                if (!visible || _state.value.loading) continue
                 val step = DayStep.now()
-                if ((step == DayStep.ENTRY || step == DayStep.MANAGE || step == DayStep.EXIT) && !_state.value.loading)
-                    refresh(mode = RefreshMode.LIVE, quiet = true)
+                val market = step == DayStep.OPENING || step == DayStep.ENTRY || step == DayStep.MANAGE || step == DayStep.EXIT
+                val every = if (market) 30_000L else 5 * 60_000L
+                if (System.currentTimeMillis() - lastAuto >= every) {
+                    lastAuto = System.currentTimeMillis()
+                    refresh(mode = if (market) RefreshMode.LIVE else RefreshMode.NORMAL, quiet = true)
+                }
             }
         }
+    }
+
+    /** Called by the screen: refresh right away when the app comes back to the front. */
+    fun setVisible(v: Boolean) {
+        val wasHidden = !visible
+        visible = v
+        if (v && wasHidden) { lastAuto = System.currentTimeMillis(); refresh(mode = RefreshMode.LIVE, quiet = true) }
     }
 
     fun refresh(force: Boolean = false, mode: RefreshMode = RefreshMode.NORMAL, quiet: Boolean = false) {
@@ -111,7 +126,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (!s.liveAlerts && old.liveAlerts) LiveService.stop(getApplication<Application>())
         when {
             universeChanged -> { repo.store.modelDay = null; repo.store.indexModelDay = null; refresh(force = true) }
-            pointsChanged -> { repo.store.indexModelDay = null; refresh() }
+            pointsChanged || s.smartIndexStop != old.smartIndexStop -> { repo.store.indexModelDay = null; refresh() }
             else -> refresh(quiet = true)
         }
     }
