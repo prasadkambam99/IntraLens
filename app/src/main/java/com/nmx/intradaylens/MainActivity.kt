@@ -12,12 +12,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,20 +29,23 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nmx.intradaylens.data.Repository
 import com.nmx.intradaylens.ui.AppColors
 import com.nmx.intradaylens.ui.C
 import com.nmx.intradaylens.ui.DetailScreen
-import com.nmx.intradaylens.ui.JournalScreen
 import com.nmx.intradaylens.ui.MainViewModel
 import com.nmx.intradaylens.ui.ModelScreen
+import com.nmx.intradaylens.ui.ResultsScreen
 import com.nmx.intradaylens.ui.SettingsScreen
 import com.nmx.intradaylens.ui.TodayScreen
 import com.nmx.intradaylens.ui.WatchlistScreen
+import com.nmx.intradaylens.work.LiveService
 
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
@@ -53,31 +54,39 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 33) {
-            registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { LiveService.startIfNeeded(this) }
                 .launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         val tabs = listOf(
             "Today" to Icons.Filled.Home,
-            "Watchlist" to Icons.Filled.Star,
-            "Journal" to Icons.Filled.DateRange,
-            "AI Model" to Icons.Filled.Build,
+            "Results" to Icons.Filled.DateRange,
             "Settings" to Icons.Filled.Settings
         )
         setContent {
             MaterialTheme(colorScheme = AppColors) {
                 val st by vm.state.collectAsStateWithLifecycle()
                 var tab by rememberSaveable { mutableIntStateOf(0) }
+                // "watchlist" / "model" sub-screens opened from Settings
+                var sub by rememberSaveable { mutableStateOf<String?>(null) }
                 val selected = st.selected
-                BackHandler(enabled = selected != null) { vm.select(null) }
+                BackHandler(enabled = selected != null || sub != null) {
+                    if (selected != null) vm.select(null) else sub = null
+                }
+                val title = when {
+                    selected != null -> Repository.label(selected.symbol)
+                    sub == "watchlist" -> "Watchlist"
+                    sub == "model" -> "AI accuracy"
+                    else -> "Intraday Lens"
+                }
                 Scaffold(
                     containerColor = C.Bg,
                     topBar = {
                         TopAppBar(
-                            title = {
-                                Text(if (selected != null) com.nmx.intradaylens.data.Repository.label(selected.symbol) else "Intraday Lens", fontWeight = FontWeight.Bold)
-                            },
+                            title = { Text(title, fontWeight = FontWeight.Bold) },
                             navigationIcon = {
-                                if (selected != null) IconButton(onClick = { vm.select(null) }) {
+                                if (selected != null || sub != null) IconButton(onClick = {
+                                    if (selected != null) vm.select(null) else sub = null
+                                }) {
                                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                                 }
                             },
@@ -89,7 +98,7 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     bottomBar = {
-                        if (selected == null) NavigationBar(containerColor = C.Card) {
+                        if (selected == null && sub == null) NavigationBar(containerColor = C.Card) {
                             tabs.forEachIndexed { i, (label, icon) ->
                                 NavigationBarItem(
                                     selected = tab == i,
@@ -106,17 +115,22 @@ class MainActivity : ComponentActivity() {
                     }
                 ) { pad ->
                     Box(Modifier.padding(pad)) {
-                        if (selected != null) DetailScreen(selected, st, vm)
-                        else when (tab) {
-                            0 -> TodayScreen(st, vm)
-                            1 -> WatchlistScreen(st)
-                            2 -> JournalScreen(st)
-                            3 -> ModelScreen(st)
-                            else -> SettingsScreen(st, vm)
+                        when {
+                            selected != null -> DetailScreen(selected, st, vm)
+                            sub == "watchlist" -> WatchlistScreen(st)
+                            sub == "model" -> ModelScreen(st)
+                            tab == 0 -> TodayScreen(st, vm)
+                            tab == 1 -> ResultsScreen(st)
+                            else -> SettingsScreen(st, vm, openWatchlist = { sub = "watchlist" }, openModel = { sub = "model" })
                         }
                     }
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        LiveService.startIfNeeded(this)
     }
 }

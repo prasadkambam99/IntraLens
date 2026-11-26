@@ -20,7 +20,7 @@ data class Candle(
     val date: LocalDate get() = Instant.ofEpochSecond(t).atZone(IST).toLocalDate()
 }
 
-/** All 5-minute bars of one trading session. */
+/** All bars (1-min or 5-min) of one trading session. */
 data class Session(val date: LocalDate, val bars: List<Candle>) {
     val open get() = bars.first().o
     val high get() = bars.maxOf { it.h }
@@ -28,7 +28,7 @@ data class Session(val date: LocalDate, val bars: List<Candle>) {
     val close get() = bars.last().c
     val volume get() = bars.sumOf { it.v }
 
-    /** Bars of the opening range (9:15–9:30), whatever the bar size (1-min or 5-min). */
+    /** Bars of the opening range (9:15–9:30), whatever the bar size. */
     val orBars: List<Candle> get() = bars.filter { it.time.isBefore(Rules.PICKS_READY) }
 
     /** Bar length in seconds (300 for 5-min, 60 for 1-min). */
@@ -39,7 +39,7 @@ data class Session(val date: LocalDate, val bars: List<Candle>) {
         val o = orBars
         if (o.isEmpty()) return false
         if (bars.size > o.size) return true
-        val endOfLast = java.time.Instant.ofEpochSecond(o.last().t + barSeconds).atZone(IST).toLocalTime()
+        val endOfLast = Instant.ofEpochSecond(o.last().t + barSeconds).atZone(IST).toLocalTime()
         return !endOfLast.isBefore(Rules.PICKS_READY)
     }
 }
@@ -53,23 +53,47 @@ enum class TradeStatus(val label: String) {
     ACTIVE("In trade"),
     WIN("Target hit"),
     LOSS("Stop-loss hit"),
+    BREAKEVEN("Exited at entry price"),
     TIME_EXIT("Closed at 3:15 PM"),
-    NOT_TRIGGERED("Entry never triggered")
+    NOT_TRIGGERED("No entry today");
+
+    val done get() = this == WIN || this == LOSS || this == BREAKEVEN || this == TIME_EXIT || this == NOT_TRIGGERED
+    val traded get() = this == WIN || this == LOSS || this == BREAKEVEN || this == TIME_EXIT || this == ACTIVE
+}
+
+/** Simple label instead of a raw percentage. */
+enum class Strength(val label: String) {
+    STRONG("Strong"), GOOD("Good"), WEAK("Weak"), SKIP("Skip");
+
+    companion object {
+        /** Edge = probability minus the win rate needed to break even. */
+        fun of(probability: Double, breakEven: Double): Strength {
+            val edge = probability - breakEven
+            return when {
+                edge >= 0.15 -> STRONG
+                edge >= 0.07 -> GOOD
+                edge >= 0.0 -> WEAK
+                else -> SKIP
+            }
+        }
+    }
 }
 
 /** Trading rules used everywhere (training, back-test and live). */
 object Rules {
-    const val OR_BARS = 3                         // opening range = first 15 minutes
     val ENTRY_DEADLINE: LocalTime = LocalTime.of(13, 0)
     val EXIT_TIME: LocalTime = LocalTime.of(15, 15)
     val MARKET_OPEN: LocalTime = LocalTime.of(9, 15)
     val MARKET_CLOSE: LocalTime = LocalTime.of(15, 30)
     val PICKS_READY: LocalTime = LocalTime.of(9, 30)
-    const val ENTRY_BUFFER = 0.0005               // 0.05% above/below the range
-    const val MIN_RISK = 0.0035                   // stop at least 0.35% away
-    const val MAX_RISK = 0.012                    // stop at most 1.2% away
-    const val REWARD_R = 1.5                      // target = 1.5 x risk
+    const val ENTRY_BUFFER = 0.0005               // 0.05% beyond the range
+    const val MIN_RISK = 0.0035                   // stock stop at least 0.35% away
+    const val MAX_RISK = 0.012                    // stock stop at most 1.2% away
+    const val REWARD_R = 1.5                      // stock target = 1.5 x risk
     const val MIN_HISTORY_DAYS = 21
+    const val CONFIRM_MINUTES = 5                 // entry only on a 5-minute candle CLOSE beyond the level
+    const val VOLUME_CONFIRM = 0.7                // breakout candle volume >= 70% of the day's average so far
+    const val BREAKEVEN_AT = 0.5                  // halfway to target -> move stop to entry
 }
 
 /**
@@ -84,7 +108,7 @@ data class PlanRule(val fixedRiskPoints: Double? = null, val rewardR: Double = R
     }
 }
 
-/** Trade plan for one stock / one direction on one day. */
+/** Trade plan. Before entry, stop/target are estimates from the trigger level; they are fixed from the real fill. */
 data class TradePlan(
     val direction: Direction,
     val entry: Double,
@@ -92,9 +116,9 @@ data class TradePlan(
     val target: Double
 ) {
     val risk get() = kotlin.math.abs(entry - stop)
-    val riskPct get() = risk / entry * 100
-    val rewardPct get() = kotlin.math.abs(target - entry) / entry * 100
     val reward get() = kotlin.math.abs(target - entry)
+    val riskPct get() = risk / entry * 100
+    val rewardPct get() = reward / entry * 100
     /** Reward-to-risk ratio. */
     val rr get() = reward / risk
     /** Win rate needed to break even. */
@@ -109,11 +133,23 @@ data class TradeResult(
     val exitPrice: Double? = null,
     /** Result in R (1R = risk taken). Live R while ACTIVE. */
     val r: Double = 0.0,
-    val lastPrice: Double? = null
+    val lastPrice: Double? = null,
+    /** Real levels once entered (from the fill price). */
+    val stop: Double? = null,
+    val target: Double? = null,
+    /** True once price went halfway to target and the stop was moved to the entry price. */
+    val movedToCost: Boolean = false
 )
 
-/** Context of the market index (NIFTY) for the same day. */
-data class MarketContext(val gapPct: Double, val orMovePct: Double) {
+/** Market backdrop for one stock on one day. */
+data class MarketContext(
+    val gapPct: Double,
+    val orMovePct: Double,
+    val vixLevel: Double = 15.0,
+    val vixChangePct: Double = 0.0,
+    val sectorGapPct: Double = 0.0,
+    val sectorOrMovePct: Double = 0.0
+) {
     companion object { val NONE = MarketContext(0.0, 0.0) }
 }
 
@@ -125,10 +161,14 @@ data class Pick(
     val reasons: List<String>,
     val features: DoubleArray,
     val result: TradeResult,
-    val levels: DayLevels
+    val levels: DayLevels,
+    val orLow: Double = 0.0,
+    val orHigh: Double = 0.0,
+    val rule: PlanRule = PlanRule.STOCK
 ) {
-    /** Expected R per trade if the entry triggers (ignores 3:15 exits). */
+    /** Expected R per trade if the entry triggers. */
     val expectedR get() = probability * plan.rr - (1 - probability)
+    val strength get() = Strength.of(probability, plan.breakEven)
 }
 
 /** Useful reference levels from the previous session. */

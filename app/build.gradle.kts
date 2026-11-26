@@ -12,8 +12,8 @@ android {
         applicationId = "com.nmx.intradaylens"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "2.0"
     }
 
     // Fixed personal key: every new build installs as an UPDATE, so your journal is kept.

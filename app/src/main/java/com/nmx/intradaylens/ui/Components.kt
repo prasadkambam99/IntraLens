@@ -65,6 +65,7 @@ fun statusColor(s: TradeStatus) = when (s) {
     TradeStatus.LOSS -> C.Red
     TradeStatus.ACTIVE -> C.Blue
     TradeStatus.TIME_EXIT -> C.Gold
+    TradeStatus.BREAKEVEN -> C.Blue
     else -> C.Muted
 }
 
@@ -197,4 +198,62 @@ fun ContributionBar(name: String, value: Double, maxAbs: Double) {
                 .background(if (value >= 0) C.Green else C.Red))
         }
     }
+}
+
+fun strengthColor(s: com.nmx.intradaylens.engine.Strength) = when (s) {
+    com.nmx.intradaylens.engine.Strength.STRONG -> C.Green
+    com.nmx.intradaylens.engine.Strength.GOOD -> C.Gold
+    com.nmx.intradaylens.engine.Strength.WEAK -> C.Muted
+    com.nmx.intradaylens.engine.Strength.SKIP -> C.Red
+}
+
+fun actionColor(k: com.nmx.intradaylens.data.ActionKind) = when (k) {
+    com.nmx.intradaylens.data.ActionKind.BUY_NOW, com.nmx.intradaylens.data.ActionKind.HOLD,
+    com.nmx.intradaylens.data.ActionKind.DONE_WIN -> C.Green
+    com.nmx.intradaylens.data.ActionKind.EXIT_NOW, com.nmx.intradaylens.data.ActionKind.DONE_LOSS -> C.Red
+    com.nmx.intradaylens.data.ActionKind.WAIT -> C.Gold
+    com.nmx.intradaylens.data.ActionKind.DONE_EVEN, com.nmx.intradaylens.data.ActionKind.DONE_TIME -> C.Blue
+    else -> C.Muted
+}
+
+/** The bar at the top: which part of the trading day we're in. */
+@Composable
+fun ClockBar(step: com.nmx.intradaylens.data.DayStep, timeText: String) {
+    val order = listOf(
+        com.nmx.intradaylens.data.DayStep.OPENING, com.nmx.intradaylens.data.DayStep.ENTRY,
+        com.nmx.intradaylens.data.DayStep.MANAGE, com.nmx.intradaylens.data.DayStep.EXIT
+    )
+    val pos = when (step) {
+        com.nmx.intradaylens.data.DayStep.BEFORE -> -1
+        com.nmx.intradaylens.data.DayStep.CLOSED -> 4
+        else -> order.indexOf(step)
+    }
+    AppCard {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            order.indices.forEach { i ->
+                val col = when {
+                    i < pos -> C.Green
+                    i == pos -> C.Gold
+                    else -> C.Card2
+                }
+                Box(Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(col))
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf("9:15 Open", "9:30 Entry", "1:00 No entry", "3:15 Exit").forEach { Text(it, color = C.Muted, fontSize = 10.sp) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("$timeText • ${step.label}", color = if (step == com.nmx.intradaylens.data.DayStep.EXIT) C.Red else C.Gold,
+            fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text(step.hint, color = C.Muted, fontSize = 12.sp)
+    }
+}
+
+@Composable
+fun Banner(text: String, color: Color) {
+    Box(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp)).background(color.copy(alpha = 0.15f)).padding(12.dp)
+    ) { Text(text, color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
 }

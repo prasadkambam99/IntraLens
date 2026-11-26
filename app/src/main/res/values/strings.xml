@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Intraday Lens</string>
+    <string name="widget_desc">NIFTY and BANK NIFTY: what to do now</string>
 </resources>

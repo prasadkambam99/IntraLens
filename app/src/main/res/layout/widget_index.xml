@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="@drawable/widget_bg">
+
+    <TextView
+        android:id="@+id/widget_step"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Intraday Lens"
+        android:textColor="#8B98A5"
+        android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/widget_line1"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="NIFTY 50: open app"
+        android:textColor="#E6EDF3"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_line2"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:text="BANK NIFTY: open app"
+        android:textColor="#E6EDF3"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+</LinearLayout>

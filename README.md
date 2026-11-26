@@ -1,72 +1,58 @@
-# Intraday Lens
+# Intraday Lens 2.0
 
-A personal Android app for researching intraday trades on NSE stocks. Everything runs on the phone: there is no server, no broker account and no API key.
+A personal Android app for researching intraday trades on NIFTY 50, BANK NIFTY and large NSE stocks. Everything runs on the phone: there is no server and no broker account.
 
 > Research and paper-testing only. This is not investment advice.
 
-## What it does
+## How to use it (every market day)
+| Time | What the app shows | What you do |
+|---|---|---|
+| Before 9:15 | **Get ready** | Nothing. You can look at the Watchlist (in Settings). |
+| 9:15–9:30 | **Wait** | No trades. The app is watching the first 15 minutes. |
+| 9:30–1:00 | **Entry time**: each card shows **Wait**, **Buy now** or **Skip today** | Act only on **Buy now**. A loud alarm rings when it's time. |
+| 1:00–3:15 | **Manage trades** | No new entries. Follow **Hold**, or **Hold — no-loss stop**. |
+| 3:15 | **Exit everything** | Close all open trades. An alarm rings at 3:10. |
 
-| Screen | What you get |
-|---|---|
-| **Today** | At 9:30 AM, picks ranked by AI confidence %. Each pick shows BUY/SELL, the entry price, stop-loss, target, risk %, quantity for your ₹ risk and its live status (waiting / in trade / target hit / SL hit). |
-| **Pick detail** | The trade plan step by step, a 5-min candle chart with entry/SL/target/VWAP lines, the reasons for the pick, which factors raised or lowered the %, key levels (prev H/L/C, pivot, R1/S1, ATR, RSI) and the last 2 days of news headlines with their tone. |
-| **Watchlist** | Before the market opens: stocks set up for a bigger move (NR7, near 20-day high/low, volume spike, trend). |
-| **Journal** | Every day's picks are saved automatically at about 9:30 AM, before anyone knows how they'll turn out, and then checked against real prices. Shows win rate, total R and the ₹ result. This screen is your 2-month test. |
-| **AI Model** | An honest test on days the AI never saw: its hit rate vs. random breakouts, whether its % is trustworthy (calibration), and what it learned. |
-| **Settings** | Risk per trade, minimum confidence, number of picks, alerts, and the list of stocks. |
+### Action words
+* **Wait:** the price hasn't confirmed the breakout yet.
+* **Buy now / Sell now:** enter now. The card shows the stop-loss and target.
+* **Hold:** you're in the trade.
+* **Hold — no-loss stop:** price has gone halfway to the target. Move your stop-loss to your entry price, so the trade can no longer lose.
+* **Done:** the trade is finished. It shows target hit, stop-loss hit, exited at cost or closed at 3:15.
+* **Skip today:** the setup is too weak, it's a wild day, or you've hit the loss limit.
 
-Alerts (every 15 min while the market is open): picks ready, entry triggered, target hit, stop-loss hit.
+### Strength labels (instead of %)
+**Strong**, **Good**, **Weak** and **Skip** show how far the AI's chance is above break-even. Only Strong and Good can become **Buy now**. With **Strict mode** on in Settings, only Strong can.
 
-## NIFTY 50 and BANK NIFTY
-* The Today screen has a separate section for the two indices.
-* **Fixed stop-loss and target, 20 points each by default.** You can change both in Settings.
-* **CALL or PUT suggestion:** a BUY signal means "Buy NIFTY <strike> CE (CALL)", and a SELL signal means "Buy NIFTY <strike> PE (PUT)". The strike is the one closest to the price (at the money): NIFTY strikes go in steps of 50 and BANK NIFTY in steps of 100. The suggestion uses the nearest expiry.
-* The stop-loss and target are levels on the **index**. An at-the-money option moves roughly half as many points, so 20 index points is about 10 points on the option premium.
-* **The indices have their own AI.** It uses 1-minute data, because a 20-point move is smaller than a single 5-minute candle.
-  * Yahoo keeps only about 30 days of 1-minute data, so the app saves it every day and gets better over time.
-* With equal stop and target, **break-even is 50%**.
+## NIFTY and BANK NIFTY
+* The stop-loss and target are fixed at 20 points each by default. You can change both in Settings.
+* A BUY signal shows as **CALL (CE)** and a SELL signal as **PUT (PE)**. The suggested strike is the one nearest the price (at the money).
+* The levels are on the **index chart**. An at-the-money option moves roughly half as many points as the index.
 
-## The strategy and the AI
+## Accuracy features
+* **Confirmation:** a trade enters only when a 5-minute candle *closes* beyond the level, not just touches it.
+* **Volume check:** stock breakouts need decent volume.
+* **More signals:** the AI also looks at India VIX, the stock's sector index and NIFTY's direction.
+* **Smarter AI:** each day it trains a simple model and a boosted-trees model, tests both on unseen days, and keeps whichever was best.
+* **1-minute data** for the indices, so a 20-point stop and target are checked accurately.
 
-* **Setup:** a 15-minute opening range breakout.
-  * BUY when price breaks above the high of 9:15–9:30. SELL (short) when it breaks below the low.
-  * The stop-loss goes on the other side of the range, between 0.35% and 1.2% away.
-  * The target is 1.5× the risk.
-  * Entries are taken only until 1:00 PM, and every trade is closed at 3:15 PM.
-* **AI:** a small logistic-regression model trained on the phone. Every day it re-learns from the last ~60 days of real 5-minute prices for all stocks: was each past breakout a winner? It learns which conditions predicted wins, and the app keeps more history every day.
-  * The 14 conditions it looks at: gap, range size, opening volume, VWAP, trend, RSI, NIFTY direction, room to yesterday's high/low and others.
-* **The %:** the chance of hitting the target before the stop-loss *once the entry triggers*. With a 1.5R target, **break-even is 40%**. A pick at 60% means "expected +0.5R", not "sure win".
-* **Data:** prices come from Yahoo Finance (free, may be a few minutes delayed) and news from Google News RSS.
+## Safety features
+* **Safe-day filter:** everything becomes "Skip today" when India VIX is high or jumping, or NIFTY opens with a big gap.
+* **Daily loss limit:** after 2 stop-losses, the app says "Stop trading today". You can change the number in Settings.
+* **No-loss stop:** the app tells you when to move your stop-loss to your entry price.
+* **Event warnings:** RBI policy, Budget, Fed or company results news shows a warning.
 
-## Build the APK (pick one)
+## Other features
+* **Results tab:** every pick is saved at 9:30 AM, before anyone knows the outcome. Tap **"I took this trade"** to also track **My trades** separately.
+* **Weekly report card:** a notification every Friday evening.
+* **Home-screen widget:** shows NIFTY and BANK NIFTY's action word. Add it by long-pressing the home screen → Widgets → Intraday Lens.
 
-### Option A: Android Studio (on your laptop)
-1. Install [Android Studio](https://developer.android.com/studio).
-2. **File → Open** → select the `IntradayLens` folder. Wait for "Gradle sync" to finish (the first time takes 5–10 minutes).
-3. **Build → Build App Bundle(s) / APK(s) → Build APK(s)**.
-4. The APK is at `app/build/outputs/apk/debug/app-debug.apk`. Copy it to your phone and open it. Allow "install unknown apps" when asked.
-   *Or* connect your phone with USB debugging on and press ▶ Run.
+## Build the APK
+**GitHub Actions:** push this folder to a private repository. Then go to **Actions** → **Build APK**, and download **IntradayLens-apk** from the finished run.
+**Android Studio:** open the folder, then **Build → Build APK(s)**.
+Every build is signed with the same personal key, so it installs over the old version and keeps your results.
 
-### Option B: GitHub builds it for you (no Android Studio)
-1. Create a new **private** repository on github.com.
-2. Upload all files in this folder, including the hidden `.github` folder. Using `git push` is easiest, because macOS Finder hides dot-folders when you drag and drop.
-3. Open the **Actions** tab → "Build APK" → when it turns green, download **IntradayLens-apk** (a zip with the APK inside).
-
-The project includes a fixed personal signing key (`app/personal.keystore`), so every new build installs as an **update** and your journal is kept.
-
-## Daily use
-1. Open the app any time. The first run downloads ~60 days of data and trains the AI (1–2 minutes on Wi-Fi).
-2. Before 9:15, check the **Watchlist**.
-3. After 9:30, look at the **Today** picks. Tap a pick for its full plan.
-4. Each evening, check the **Journal**.
-
-On Android, set battery usage for the app to "Unrestricted" so background alerts arrive on time.
-
-## The 2-month test: how to judge it
-* You need **30+ triggered trades** before the numbers mean anything.
-* Look at **Avg R per trade** in the Journal. After brokerage and taxes it needs to be clearly above 0, roughly +0.15R or more.
-* Check the AI Model screen to see whether the calibration table matches what really happened.
-* If the results are flat, try fewer picks (raise the minimum confidence) or a different stock list before trusting it with money.
-
-## Ideas for later
-Long-term stock scoring, an on-device LLM news summary (e.g. Gemma via MediaPipe), more strategies (VWAP pullback, gap fill), sector strength, and exporting the journal to CSV.
+## Phone settings (important)
+* Allow notifications.
+* Set battery usage for the app to **Unrestricted**, so alarms and live tracking aren't stopped by the phone.
+* Open the app once after 9:00 AM on market days to start live alerts.
